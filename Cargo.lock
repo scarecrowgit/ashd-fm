@@ -1717,6 +1717,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "gpui",
+ "imagesize",
  "pulldown-cmark",
  "rust-embed",
  "smol",
