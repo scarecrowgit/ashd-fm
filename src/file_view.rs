@@ -492,7 +492,8 @@ fn grid_body(app: &mut FmApp, cx: &mut Context<FmApp>) -> AnyElement {
                     div().h(px(TILE_H + GRID_GAP)).w_full().px(px(GRID_PAD)).flex().items_start().gap(px(GRID_GAP)).children(
                         (first..first + columns).map(|row| match this.tab().entry_at(row) {
                             Some(entry) => grid_tile(this, row, entry, &frame, cx),
-                            None => div().flex_1().min_w_0().into_any_element(),
+                            // Same padding + border as a tile, or flex would hand the real tiles the difference.
+                            None => div().flex_1().min_w_0().p(px(8.)).border_1().border_color(gpui::transparent_black()).into_any_element(),
                         }),
                     )
                 })
