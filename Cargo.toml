@@ -11,6 +11,7 @@ rust-embed = "8"
 unicode-segmentation = "1"
 smol = "2"
 trash = "5"
+libc = "0.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 
 [profile.dev]

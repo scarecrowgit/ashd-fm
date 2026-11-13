@@ -1717,6 +1717,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "gpui",
+ "libc",
  "pulldown-cmark",
  "rust-embed",
  "smol",
