@@ -318,3 +318,42 @@ pub fn short_name(path: &Path) -> String {
     }
     path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "/".into())
 }
+
+/// A command-line / D-Bus argument as a path: accepts `file://` URIs (percent-decoded),
+/// `~`-relative and plain paths.
+pub fn path_from_arg(arg: &str) -> PathBuf {
+    let Some(rest) = arg.strip_prefix("file://") else { return expand_path(arg) };
+    // file://host/path — drop the (normally empty) host part.
+    let rest = &rest[rest.find('/').unwrap_or(rest.len())..];
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16).map(|d| d as u8);
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2]))
+        {
+            out.push(hi * 16 + lo);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    use std::os::unix::ffi::OsStringExt;
+    PathBuf::from(std::ffi::OsString::from_vec(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uri_arguments() {
+        assert_eq!(path_from_arg("file:///tmp/a%20b/%D1%84.txt"), PathBuf::from("/tmp/a b/ф.txt"));
+        assert_eq!(path_from_arg("file://localhost/etc"), PathBuf::from("/etc"));
+        assert_eq!(path_from_arg("/plain/100%"), PathBuf::from("/plain/100%"));
+        assert_eq!(path_from_arg("file:///x%2"), PathBuf::from("/x%2"));
+    }
+}

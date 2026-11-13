@@ -22,12 +22,23 @@ use crate::{
     git::{self, GitState},
     ops::{self, OpsState},
     overlays::{self, OverlaysState},
+    picker::{self, PickRequest, PickerState},
     preview::{self, PreviewState},
     quicklook::{self, QuickLookState},
     sidebar::{self, SidebarState},
     theme::{self, Theme, theme},
     toolbar::{self, ToolbarState},
 };
+
+/// What `main` asks the window to start with.
+#[derive(Clone, Debug)]
+pub struct StartOptions {
+    pub path: PathBuf,
+    /// Put the cursor on this entry once the folder has loaded.
+    pub cursor_on: Option<PathBuf>,
+    /// Run as a file chooser (see picker.rs).
+    pub pick: Option<PickRequest>,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ViewMode {
@@ -169,6 +180,8 @@ pub struct FmApp {
     pub overlays: OverlaysState,
     pub ops: OpsState,
     pub git: GitState,
+    /// `Some` while running as a file chooser for another application.
+    pub picker: Option<PickerState>,
 }
 
 impl Focusable for FmApp {
@@ -178,7 +191,8 @@ impl Focusable for FmApp {
 }
 
 impl FmApp {
-    pub fn new(start: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(options: StartOptions, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let StartOptions { path: start, cursor_on, pick } = options;
         let focus = cx.focus_handle();
         focus.focus(window);
         cx.observe_window_activation(window, |_, _, cx| cx.notify()).detach();
@@ -199,7 +213,9 @@ impl FmApp {
             overlays: OverlaysState::new(window, cx),
             ops: OpsState::new(window, cx),
             git: GitState::default(),
+            picker: pick.map(|request| PickerState::new(request, window, cx)),
         };
+        this.tab_mut().pending_cursor = cursor_on;
         this.load_active(cx);
         this
     }
@@ -498,6 +514,8 @@ impl FmApp {
     pub fn open_entry(&mut self, entry: &Entry, cx: &mut Context<Self>) {
         if entry.is_dir {
             self.navigate(entry.path.clone(), cx);
+        } else if picker::on_open_file(self, entry.path.clone(), cx) {
+            // Chosen for the application that asked.
         } else {
             ops::open_external(&entry.path, cx);
         }
@@ -569,6 +587,8 @@ impl FmApp {
         } else if !self.tab().filter.is_empty() {
             self.set_filter("", cx);
             toolbar::on_directory_changed(self, cx);
+        } else if self.picker.is_some() && self.focus.is_focused(window) {
+            return picker::cancel(self, cx);
         }
         self.focus_list(window);
     }
@@ -610,7 +630,11 @@ impl Render for FmApp {
         if self.quicklook.is_open() {
             key_context.add("QuickLook");
         }
-        window.set_window_title(&format!("fm — {}", fs_model::display_path(self.cwd())));
+        let title = match &self.picker {
+            Some(picker) => format!("{} — fm", picker.title()),
+            None => format!("fm — {}", fs_model::display_path(self.cwd())),
+        };
+        window.set_window_title(&title);
 
         let body = div()
             .flex()
@@ -647,7 +671,7 @@ impl Render for FmApp {
             .line_height(px(20.))
             // shell
             .on_action(cx.listener(|this, _: &Open, _, cx| {
-                if !quicklook::open_primary(this, cx) {
+                if !quicklook::open_primary(this, cx) && !picker::on_open_selection(this, cx) {
                     this.open_cursor(cx)
                 }
             }))
@@ -697,6 +721,7 @@ impl Render for FmApp {
                 this.set_theme(next, cx)
             }))
             .on_action(cx.listener(Self::act_cancel))
+            .on_action(cx.listener(|this, _: &PickerAccept, _, cx| picker::accept(this, cx)))
             // toolbar.rs
             .on_action(cx.listener(toolbar::act_filter))
             .on_action(cx.listener(toolbar::act_recursive_search))
@@ -721,7 +746,7 @@ impl Render for FmApp {
             .child(chrome::tabs(self, window, cx))
             .child(body)
             .child(chrome::footer(self, window, cx))
-            .child(chrome::hint_bar(self, window, cx))
+            .child(if self.picker.is_some() { picker::render(self, window, cx) } else { chrome::hint_bar(self, window, cx) })
             // layers above the window content, bottom to top
             .children(quicklook::render(self, window, cx))
             .children(overlays::render(self, window, cx))

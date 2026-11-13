@@ -120,3 +120,12 @@ Source + examples (read them, don't guess the API):
 glyph) and `fm.desktop`. `packaging/install.sh` builds a release binary and installs it with
 the launcher entry and icon into `~/.local` (`--uninstall` removes them). The window's
 `app_id` is `fm`, which is how Wayland compositors match it to `fm.desktop` and its icon.
+
+### Desktop integration
+
+`packaging/integrate.sh` (user-level, `--undo` reverts) makes the installed fm:
+the `inode/directory` handler; the owner of `org.freedesktop.FileManager1` (`fm --dbus-service`,
+src/dbus_service.rs — "Show in folder"); the file dialog of portal-aware apps
+(xdg-desktop-portal-termfilechooser → `packaging/portal-wrapper.sh` → `fm --pick`,
+src/picker.rs); and the `Super+E` target in niri (chooser windows have app id `fm-picker`
+and float).

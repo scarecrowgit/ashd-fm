@@ -52,6 +52,7 @@ actions!(
         Cancel,
         Refresh,
         NextTheme,
+        PickerAccept,
         Quit,
     ]
 );
@@ -117,6 +118,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("f5", Refresh, ANY),
         KeyBinding::new("ctrl-r", Refresh, ANY),
         KeyBinding::new("ctrl-shift-t", NextTheme, ANY),
+        KeyBinding::new("ctrl-enter", PickerAccept, ANY),
         KeyBinding::new("ctrl-q", Quit, ANY),
     ]);
     crate::text_input::bind_keys(cx);

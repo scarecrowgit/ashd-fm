@@ -12,6 +12,7 @@ unicode-segmentation = "1"
 smol = "2"
 trash = "5"
 libc = "0.2"
+zbus = "5"
 pulldown-cmark = { version = "0.13", default-features = false }
 # preview loaders (preview_content.rs)
 imagesize = "0.13"

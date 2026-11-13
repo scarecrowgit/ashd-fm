@@ -1761,6 +1761,7 @@ dependencies = [
  "trash",
  "unicode-segmentation",
  "xz2",
+ "zbus",
  "zip",
  "zstd",
 ]
