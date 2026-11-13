@@ -12,6 +12,14 @@ unicode-segmentation = "1"
 smol = "2"
 trash = "5"
 pulldown-cmark = { version = "0.13", default-features = false }
+# preview loaders (preview_content.rs)
+imagesize = "0.13"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1"
+zstd = "0.13"
+xz2 = "0.1"
+bzip2 = "0.5"
 
 [profile.dev]
 opt-level = 1
