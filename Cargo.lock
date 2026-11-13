@@ -1753,6 +1753,7 @@ dependencies = [
  "flate2",
  "gpui",
  "imagesize",
+ "libc",
  "pulldown-cmark",
  "rust-embed",
  "smol",
