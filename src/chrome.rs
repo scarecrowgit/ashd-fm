@@ -77,10 +77,15 @@ pub fn tabs(app: &mut FmApp, _window: &mut Window, cx: &mut Context<FmApp>) -> A
                     let text = if jobs == 1 { "1 job".to_string() } else { format!("{jobs} jobs") };
                     d.child(
                         div()
+                            .id(("tab-jobs", tab.id))
                             .font_family(t.font_mono.clone())
                             .text_size(px(9.5))
                             .text_color(t.accent)
-                            .child(text.to_uppercase()),
+                            .child(text.to_uppercase())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                cx.stop_propagation();
+                                crate::overlays::toggle_jobs_panel(this, cx)
+                            })),
                     )
                 })
                 .on_click(cx.listener(move |this, _, _, cx| this.activate_tab(ix, cx)))

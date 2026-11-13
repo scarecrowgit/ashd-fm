@@ -120,4 +120,5 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-q", Quit, ANY),
     ]);
     crate::text_input::bind_keys(cx);
+    crate::overlays::bind_keys(cx);
 }
