@@ -336,9 +336,12 @@ fn spawn_or_open(commands: Vec<Command>, path: PathBuf, cx: &mut Context<FmApp>)
     .detach();
 }
 
-fn extract_archive(_app: &mut FmApp, path: PathBuf, cx: &mut Context<FmApp>) {
-    // TODO(integration): call preview::extract_here(_app, path, cx)
-    ops::open_external(&path, cx);
+fn extract_archive(app: &mut FmApp, path: PathBuf, cx: &mut Context<FmApp>) {
+    if crate::preview_content::can_extract(&path) {
+        crate::preview::extract_here(app, path, cx);
+    } else {
+        ops::open_external(&path, cx);
+    }
 }
 
 // ── render ───────────────────────────────────────────────────────────────────
