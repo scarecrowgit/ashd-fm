@@ -194,6 +194,32 @@ impl Theme {
         }
     }
 
+    /// The theme with its font families swapped for ones that are actually installed
+    /// (e.g. `JetBrains Mono` → `JetBrainsMono Nerd Font`). Use this, not `get`, at runtime.
+    pub fn resolved(name: ThemeName, cx: &App) -> Self {
+        let mut theme = Self::get(name);
+        let installed = cx.text_system().all_font_names();
+        let pick = |wanted: &SharedString, fallbacks: &[&str]| -> SharedString {
+            let has = |n: &str| installed.iter().any(|f| f.eq_ignore_ascii_case(n));
+            let squashed = wanted.replace(' ', "");
+            std::iter::once(wanted.to_string())
+                .chain([format!("{squashed} Nerd Font"), format!("{squashed} NF"), squashed.clone()])
+                .chain(fallbacks.iter().map(|s| s.to_string()))
+                .find(|n| has(n))
+                .map(SharedString::from)
+                .unwrap_or_else(|| wanted.clone())
+        };
+        theme.font_mono = pick(
+            &theme.font_mono,
+            &["JetBrains Mono", "JetBrainsMono Nerd Font", "Geist Mono", "IBM Plex Mono", "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono"],
+        );
+        theme.font_sans = pick(
+            &theme.font_sans,
+            &["Inter", "Inter Variable", "Geist", "IBM Plex Sans", "Noto Sans", "DejaVu Sans", "Liberation Sans", "Cantarell"],
+        );
+        theme
+    }
+
     /// `--shadow-overlay`: menus, dialogs, autocomplete.
     pub fn shadow_overlay(&self) -> Vec<BoxShadow> {
         vec![BoxShadow {

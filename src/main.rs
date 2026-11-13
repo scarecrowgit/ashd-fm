@@ -46,7 +46,7 @@ fn main() {
         .unwrap_or_else(fs_model::home_dir);
 
     Application::new().with_assets(assets::Assets).run(move |cx: &mut App| {
-        cx.set_global(Theme::get(theme));
+        cx.set_global(Theme::resolved(theme, cx));
         actions::bind_keys(cx);
         cx.on_action(|_: &actions::Quit, cx| cx.quit());
 

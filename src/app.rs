@@ -542,7 +542,7 @@ impl FmApp {
     }
 
     pub fn set_theme(&mut self, name: theme::ThemeName, cx: &mut Context<Self>) {
-        cx.set_global(Theme::get(name));
+        cx.set_global(Theme::resolved(name, cx));
         cx.refresh_windows();
     }
 
