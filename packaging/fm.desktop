@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=fm
+GenericName=File Manager
+Exec=fm %U
+Icon=fm
+Terminal=false
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;
+StartupWMClass=fm
+StartupNotify=true

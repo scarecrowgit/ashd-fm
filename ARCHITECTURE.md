@@ -113,3 +113,10 @@ Source + examples (read them, don't guess the API):
   clicks outside: `.on_mouse_down_out(..)`.
 - Timers: `cx.background_executor().timer(Duration)` inside `cx.spawn`.
 - After mutating state call `cx.notify()`.
+
+## Packaging
+
+`packaging/` holds the app icon (`hicolor/` theme tree, `fm.svg` source — the rice folder
+glyph) and `fm.desktop`. `packaging/install.sh` builds a release binary and installs it with
+the launcher entry and icon into `~/.local` (`--uninstall` removes them). The window's
+`app_id` is `fm`, which is how Wayland compositors match it to `fm.desktop` and its icon.
