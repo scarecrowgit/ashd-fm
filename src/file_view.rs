@@ -9,6 +9,7 @@
 //! - `dnd.rs`    — drag payload, ghost chip, drop targets, spring-open
 
 mod dnd;
+mod marquee;
 mod rename;
 mod states;
 
@@ -36,13 +37,13 @@ use rename::RenameState;
 
 // ── grid metrics (SPEC §4.4) ──────────────────────────────────────────────────
 const GRID_MIN_TILE: f32 = 160.;
-const GRID_GAP: f32 = 10.;
-const GRID_PAD: f32 = 14.;
+pub(super) const GRID_GAP: f32 = 10.;
+pub(super) const GRID_PAD: f32 = 14.;
 const THUMB_H: f32 = 74.;
 const TILE_NAME_H: f32 = 16.;
 const TILE_SIZE_H: f32 = 14.;
 /// border + padding + thumbnail + gap + name + gap + size + padding + border
-const TILE_H: f32 = 1. + 8. + THUMB_H + 8. + TILE_NAME_H + 8. + TILE_SIZE_H + 8. + 1.;
+pub(super) const TILE_H: f32 = 1. + 8. + THUMB_H + 8. + TILE_NAME_H + 8. + TILE_SIZE_H + 8. + 1.;
 /// Images above this size get an icon instead of a decoded thumbnail.
 const THUMB_MAX_BYTES: u64 = 20 * 1024 * 1024;
 
@@ -58,6 +59,7 @@ pub struct FileViewState {
     rename_input: Entity<TextInput>,
     rename: Option<RenameState>,
     drop: DropState,
+    marquee: marquee::MarqueeState,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -76,6 +78,7 @@ impl FileViewState {
             rename_input,
             rename: None,
             drop: DropState::default(),
+            marquee: marquee::MarqueeState::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -95,6 +98,9 @@ pub fn act_rename(app: &mut FmApp, _: &Rename, window: &mut Window, cx: &mut Con
 
 /// `esc` cascade: cancel an inline rename or a drag. Return true if something was cancelled.
 pub fn cancel(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> bool {
+    if marquee::cancel(app, cx) {
+        return true;
+    }
     if cx.has_active_drag() {
         cx.stop_active_drag(window);
         app.files.drop = DropState { target: None, generation: app.files.drop.generation + 1 };
@@ -187,6 +193,9 @@ fn on_entry_click(app: &mut FmApp, row: usize, path: &PathBuf, ev: &ClickEvent, 
         return; // the click belongs to the text field
     }
     app.focus_list(window);
+    if std::mem::take(&mut app.files.marquee.suppress_click) {
+        return; // this mouse-up ended a rubber band
+    }
     let Some(row) = current_row(app, row, path) else { return };
     let modifiers = ev.modifiers();
     if modifiers.shift {
@@ -223,8 +232,8 @@ fn on_entry_context(app: &mut FmApp, row: usize, path: &PathBuf, position: Point
     }
 }
 
-/// Click, context menu, drag source and (for folders) drop target — shared by rows and tiles.
-fn wire(el: Stateful<Div>, row: usize, entry: &Entry, look: &Look, f: &Frame, cx: &mut Context<FmApp>) -> Stateful<Div> {
+/// Click, context menu and (for folders) drop target — shared by rows and tiles.
+fn wire(el: Stateful<Div>, row: usize, entry: &Entry, cx: &mut Context<FmApp>) -> Stateful<Div> {
     let path = entry.path.clone();
     let el = el
         .on_click(cx.listener({
@@ -238,20 +247,6 @@ fn wire(el: Stateful<Div>, row: usize, entry: &Entry, look: &Look, f: &Frame, cx
                 move |this, ev: &MouseDownEvent, window, cx| on_entry_context(this, row, &path, ev.position, window, cx)
             }),
         );
-    if look.renaming {
-        return el; // dragging inside the field selects text
-    }
-    let payload = DragPayload {
-        paths: match &f.selection {
-            Some(selection) if look.selected => selection.clone(),
-            _ => Arc::new(vec![path.clone()]),
-        },
-        icon: entry_icon(entry),
-    };
-    let el = el.on_drag(payload, |payload: &DragPayload, offset, window, cx| {
-        let modifiers = window.modifiers();
-        cx.new(|_| DragGhost::new(payload, offset, modifiers))
-    });
     if !entry.is_dir {
         return el;
     }
@@ -266,6 +261,26 @@ fn wire(el: Stateful<Div>, row: usize, entry: &Entry, look: &Look, f: &Frame, cx
     .on_drop(cx.listener(move |this, payload: &DragPayload, window, cx| {
         dnd::drop_into(this, payload, path.clone(), window, cx);
     }))
+}
+
+/// The part of a row/tile that starts a file drag (list: icon + name, grid: whole tile).
+/// Presses elsewhere start a rubber-band selection instead.
+fn drag_handle(el: Stateful<Div>, entry: &Entry, look: &Look, f: &Frame, cx: &mut Context<FmApp>) -> Stateful<Div> {
+    if look.renaming {
+        return el; // dragging inside the field selects text
+    }
+    let payload = DragPayload {
+        paths: match &f.selection {
+            Some(selection) if look.selected => selection.clone(),
+            _ => Arc::new(vec![entry.path.clone()]),
+        },
+        icon: entry_icon(entry),
+    };
+    el.on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, _| this.files.marquee.press_on_handle = true))
+        .on_drag(payload, |payload: &DragPayload, offset, window, cx| {
+            let modifiers = window.modifiers();
+            cx.new(|_| DragGhost::new(payload, offset, modifiers))
+        })
 }
 
 /// Make any element outside the file area a drop target for dragged files: dropping moves
@@ -356,9 +371,17 @@ fn list_row(app: &FmApp, row: usize, entry: &Entry, f: &Frame, cx: &mut Context<
     let name_cell = if look.renaming {
         name_cell.child(rename::field(app, 12., cx)).children(rename::message(app, 29., cx))
     } else {
-        name_cell
-            .when(look.selected, |d| d.child(div().w(px(3.)).h(px(14.)).flex_none().bg(t.accent)))
-            .child(div().flex_1().min_w_0().truncate().when(look.cut, |d| d.italic()).child(name_text(entry, t)))
+        name_cell.when(look.selected, |d| d.child(div().w(px(3.)).h(px(14.)).flex_none().bg(t.accent))).child(
+            // Shrinks to the name, so the rest of the row is free for rubber-band selection.
+            drag_handle(
+                div().id(("name", row)).min_w_0().flex_shrink().truncate().when(look.cut, |d| d.italic()),
+                entry,
+                &look,
+                f,
+                cx,
+            )
+            .child(name_text(entry, t)),
+        )
     };
     let meta = |width: f32| div().w(px(width)).flex_none().overflow_hidden().whitespace_nowrap().text_color(t.fg_muted);
     let git = app.git.status_for(&entry.path);
@@ -392,7 +415,7 @@ fn list_row(app: &FmApp, row: usize, entry: &Entry, f: &Frame, cx: &mut Context<
         .child(meta(96.).child(fs_model::format_perms(entry.mode)))
         .child(div().w(px(24.)).flex_none().when_some(git, |d, status| d.text_color(status.color(t)).child(status.letter())))
         .when(look.drop_target, |d| d.child(dnd::outline(t, f.drop_generation, 2., 0.)));
-    wire(el, row, entry, &look, f, cx).into_any_element()
+    wire(el, row, entry, cx).into_any_element()
 }
 
 fn list_body(app: &FmApp, cx: &mut Context<FmApp>) -> AnyElement {
@@ -491,7 +514,8 @@ fn grid_tile(app: &FmApp, row: usize, entry: &Entry, f: &Frame, cx: &mut Context
         )
     };
     let el = el.when(look.drop_target, |d| d.child(dnd::outline(t, f.drop_generation, 1., 1.)));
-    wire(el, row, entry, &look, f, cx).into_any_element()
+    let el = drag_handle(el, entry, &look, f, cx);
+    wire(el, row, entry, cx).into_any_element()
 }
 
 fn grid_body(app: &mut FmApp, cx: &mut Context<FmApp>) -> AnyElement {
@@ -667,11 +691,23 @@ pub fn render(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> 
         .flex_col()
         .overflow_hidden()
         .child(measure_width(app, cx))
+        .child(marquee::tracker(app, cx))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                this.focus_list(window);
+                let extend = ev.modifiers.control || ev.modifiers.shift || ev.modifiers.platform;
+                marquee::on_mouse_down(this, ev.position, extend);
+                cx.notify();
+            }),
+        )
         // Empty space: click clears the selection, right-click opens the folder menu,
         // a drop lands in the current folder (after a spring-open).
         .on_click(cx.listener(|this, _, window, cx| {
             this.focus_list(window);
-            this.clear_selection(cx);
+            if !std::mem::take(&mut this.files.marquee.suppress_click) {
+                this.clear_selection(cx);
+            }
         }))
         .when(browsable, |d| {
             d.on_mouse_down(
@@ -688,6 +724,7 @@ pub fn render(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> 
         })
         .when(show_header, |d| d.child(list_header(app, cx)))
         .child(div().flex_1().min_h_0().child(body))
+        .children(marquee::overlay(app, window, cx))
         .when(show_selection_bar, |d| d.child(selection_bar(app, cx)))
         .into_any_element()
 }

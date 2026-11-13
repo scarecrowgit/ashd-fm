@@ -25,7 +25,14 @@ pub fn titlebar(app: &mut FmApp, _window: &mut Window, cx: &mut Context<FmApp>) 
         .border_color(t.line)
         .font_family(t.font_mono.clone())
         .text_size(px(11.))
-        .child("fm")
+        .child(
+            div()
+                .flex()
+                .gap(px(8.))
+                .child("fm")
+                // SAFETY: geteuid has no preconditions.
+                .when(unsafe { libc::geteuid() } == 0, |d| d.child(div().text_color(t.err).child("ROOT"))),
+        )
         .child(div().text_color(t.fg_muted).child(cwd_label(app)))
         .into_any_element()
 }

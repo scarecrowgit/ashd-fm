@@ -871,9 +871,12 @@ pub fn render(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> 
         });
         children.push(group_header("tags", false, rail, cx));
         for (ix, name) in names.into_iter().enumerate() {
-            let mut tagged = sb.tags.iter().filter(|tag| tag.name == name);
-            let target = tagged.next().and_then(|tag| tag.path.parent().map(Path::to_path_buf));
-            let count = 1 + tagged.count();
+            let tagged: Vec<&PathBuf> = sb.tags.iter().filter(|tag| tag.name == name).map(|tag| &tag.path).collect();
+            // A tagged folder is the tag's destination (click opens it, files dropped on the
+            // tag move into it); with only files tagged, click shows the first one's folder.
+            let folder = tagged.iter().find(|p| p.is_dir()).map(|p| p.to_path_buf());
+            let target = folder.clone().or_else(|| tagged.first().and_then(|p| p.parent().map(Path::to_path_buf)));
+            let count = tagged.len();
             let spec = ItemSpec {
                 key: format!("tag-{ix}").into(),
                 lead: Lead::Dot(tag_color(&name, &t)),
@@ -882,6 +885,10 @@ pub fn render(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> 
                 active: false,
             };
             let el = item(spec, rail, hover, &t, cx);
+            let el = match folder {
+                Some(folder) => crate::file_view::as_drop_target(app, el, folder, cx),
+                None => el,
+            };
             children.push(match target {
                 Some(path) => el.on_click(cx.listener(move |this, _, _, cx| this.navigate(path.clone(), cx))),
                 None => el,

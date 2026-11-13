@@ -152,6 +152,43 @@ fn back_button(kind: ButtonKind, cx: &mut Context<FmApp>) -> AnyElement {
         .into_any_element()
 }
 
+/// "Open as root": a second fm window running as root through polkit (`pkexec`; the shell's
+/// polkit agent asks for the password). pkexec clears the environment, so the Wayland socket
+/// and library path are passed explicitly.
+fn open_as_root(app: &mut FmApp, path: std::path::PathBuf, cx: &mut Context<FmApp>) {
+    use std::process::{Command, Stdio};
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut cmd = Command::new("pkexec");
+    cmd.arg("env");
+    let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
+    let display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".into());
+    let socket = if display.starts_with('/') { display } else { format!("{runtime}/{display}") };
+    cmd.arg(format!("WAYLAND_DISPLAY={socket}"));
+    for var in ["LD_LIBRARY_PATH", "XCURSOR_THEME", "XCURSOR_SIZE", "XKB_DEFAULT_LAYOUT", "LANG"] {
+        if let Ok(value) = std::env::var(var) {
+            cmd.arg(format!("{var}={value}"));
+        }
+    }
+    cmd.arg(exe).arg("--theme").arg(theme(cx).name.label()).arg(&path);
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(err) => return crate::overlays::toast_error(app, format!("Could not run pkexec · {err}"), cx),
+    };
+    // pkexec returns when the root window closes; 126/127 mean the request was refused.
+    let wait = smol::unblock(move || child.wait());
+    cx.spawn(async move |this, cx| {
+        let status = wait.await;
+        this.update(cx, |app, cx| match status.ok().and_then(|s| s.code()) {
+            Some(126) => crate::overlays::toast_error(app, "Authentication cancelled", cx),
+            Some(127) => crate::overlays::toast_error(app, "Not authorised to open as root", cx),
+            _ => {}
+        })
+        .ok();
+    })
+    .detach();
+}
+
 /// Name of the removable volume a path lives on (`/run/media/<user>/<NAME>/…`, `/media/<NAME>/…`).
 fn device_name(path: &Path) -> Option<String> {
     let (rest, skip) = if let Ok(rest) = path.strip_prefix("/run/media") {
@@ -171,11 +208,12 @@ pub fn error(app: &FmApp, err: &DirError, cx: &mut Context<FmApp>) -> AnyElement
     let path = app.cwd().to_path_buf();
     if *err == DirError::PermissionDenied {
         let title = format!("No access to {}", fs_model::display_path(&path));
-        // Elevation (polkit) is out of scope: the primary action is shown, but disabled.
         let buttons = vec![
             button("state-open-root", "Open as root", ButtonKind::Primary, cx)
-                .opacity(0.4)
-                .cursor_default()
+                .on_click(cx.listener({
+                    let path = path.clone();
+                    move |this, _, _, cx| open_as_root(this, path.clone(), cx)
+                }))
                 .into_any_element(),
             back_button(ButtonKind::Secondary, cx),
         ];
