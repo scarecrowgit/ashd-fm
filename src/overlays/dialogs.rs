@@ -161,10 +161,11 @@ pub(super) fn render_conflict(app: &FmApp, _window: &mut Window, cx: &mut Contex
         TransferKind::Link => "Linking",
     };
     let subtitle = format!(
-        "{verb} to {} · conflict {} of {}",
-        display_path(&job.to),
+        // Count first: the path can be long and the line is clipped at the dialog edge.
+        "conflict {} of {} · {verb} to {}",
         conflict.index,
-        conflict.index + conflict.remaining
+        conflict.index + conflict.remaining,
+        display_path(&job.to)
     );
     // The newer side gets the accent.
     let incoming_newer = match (conflict.src.modified, conflict.dst.modified) {

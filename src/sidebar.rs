@@ -769,8 +769,14 @@ fn device(ix: usize, m: &Mount, t: &Theme, cx: &mut Context<FmApp>) -> Stateful<
 }
 
 /// Left click navigates, middle click opens a new tab.
-fn with_navigation(el: Stateful<Div>, path: &Path, cx: &mut Context<FmApp>) -> Stateful<Div> {
+/// Dragged files can be dropped on it (except the trash, which is not a plain folder).
+fn with_navigation(app: &FmApp, el: Stateful<Div>, path: &Path, cx: &mut Context<FmApp>) -> Stateful<Div> {
     let (click_path, middle_path) = (path.to_path_buf(), path.to_path_buf());
+    let el = if path == crate::fs_model::trash_dir() {
+        el
+    } else {
+        crate::file_view::as_drop_target(app, el, path.to_path_buf(), cx)
+    };
     el.on_click(cx.listener(move |this, _, _, cx| this.navigate(click_path.clone(), cx))).on_mouse_down(
         MouseButton::Middle,
         cx.listener(move |this, _, _, cx| this.new_tab(Some(middle_path.clone()), cx)),
@@ -803,7 +809,7 @@ pub fn render(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> 
             meta: place.meta.clone(),
             active: active_place == Some(ix),
         };
-        children.push(with_navigation(item(spec, rail, hover, &t, cx), &place.path, cx).into_any_element());
+        children.push(with_navigation(app, item(spec, rail, hover, &t, cx), &place.path, cx).into_any_element());
     }
 
     // devices
@@ -821,7 +827,7 @@ pub fn render(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> 
         } else {
             device(ix, m, &t, cx)
         };
-        children.push(with_navigation(el, &m.mount, cx).into_any_element());
+        children.push(with_navigation(app, el, &m.mount, cx).into_any_element());
     }
 
     // bookmarks
@@ -837,7 +843,7 @@ pub fn render(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> 
             };
             let remove = path.clone();
             children.push(
-                with_navigation(item(spec, rail, hover, &t, cx), path, cx)
+                with_navigation(app, item(spec, rail, hover, &t, cx), path, cx)
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, _, _, cx| {

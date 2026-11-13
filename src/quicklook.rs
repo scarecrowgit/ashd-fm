@@ -659,10 +659,10 @@ fn folder_body(data: &Arc<PreviewData>, count: usize, ql: &QuickLookState, t: &T
         range
             .map(|row| {
                 let start = row * FOLDER_COLS;
-                div().h(px(TILE_H + TILE_GAP)).pb(px(TILE_GAP)).flex().gap(px(TILE_GAP)).children(
+                div().h(px(TILE_H + TILE_GAP)).w_full().pb(px(TILE_GAP)).flex().gap(px(TILE_GAP)).children(
                     (start..start + FOLDER_COLS).map(|ix| match items.get(ix) {
                         Some(entry) => folder_tile(entry, &t),
-                        None => div().flex_1().min_w_0(),
+                        None => div().flex_1().min_w_0().p(px(8.)).border_1().border_color(gpui::transparent_black()),
                     }),
                 )
             })

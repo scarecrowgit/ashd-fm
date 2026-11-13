@@ -22,7 +22,7 @@ use super::{
 use crate::{
     actions,
     app::FmApp,
-    fs_model::{self, display_path},
+    fs_model,
     icons::{Icon, icon},
     ops,
     theme::{self, ease_standard, theme},
@@ -301,7 +301,7 @@ pub(super) fn open(
             let header = ops::name_of(&path);
             (vec![path], is_dir, header, file_rows(is_dir, &caps))
         }
-        MenuTarget::Empty => (Vec::new(), false, format!("{} · empty space", display_path(&dir)), empty_rows(app)),
+        MenuTarget::Empty => (Vec::new(), false, crate::fs_model::short_name(&dir), empty_rows(app)),
         MenuTarget::Selection => {
             let paths = app.tab().targets();
             let header = ops::plural(paths.len() as u64, "item");

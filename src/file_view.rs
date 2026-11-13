@@ -268,6 +268,28 @@ fn wire(el: Stateful<Div>, row: usize, entry: &Entry, look: &Look, f: &Frame, cx
     }))
 }
 
+/// Make any element outside the file area a drop target for dragged files: dropping moves
+/// (ctrl: copies, alt: links) them into `path`; hovering 600 ms springs the folder open.
+/// Used by the toolbar crumbs (drop into the parent or any ancestor) and sidebar places.
+pub fn as_drop_target(app: &FmApp, el: Stateful<Div>, path: PathBuf, cx: &mut Context<FmApp>) -> Stateful<Div> {
+    let t = theme(cx).clone();
+    let is_target = app.files.drop.target.as_deref() == Some(path.as_path());
+    let generation = app.files.drop.generation;
+    el.relative()
+        .when(is_target, |d| d.child(dnd::outline(&t, generation, 0., 0.)))
+        .on_drag_move(cx.listener({
+            let path = path.clone();
+            move |this, ev: &DragMoveEvent<DragPayload>, _, cx| {
+                let inside = ev.bounds.contains(&ev.event.position);
+                let droppable = inside && dnd::can_drop(&ev.drag(cx).paths, &path);
+                dnd::hover(this, &path, inside, droppable, cx);
+            }
+        }))
+        .on_drop(cx.listener(move |this, payload: &DragPayload, window, cx| {
+            dnd::drop_into(this, payload, path.clone(), window, cx);
+        }))
+}
+
 // ── list view (SPEC §4.3) ─────────────────────────────────────────────────────
 
 fn sort_label(app: &FmApp, text: &'static str, key: SortKey, cx: &mut Context<FmApp>) -> Stateful<Div> {

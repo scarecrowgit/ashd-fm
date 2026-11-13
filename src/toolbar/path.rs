@@ -477,9 +477,12 @@ fn crumb_bar(app: &FmApp, t: &Theme, window: &mut Window, cx: &mut Context<FmApp
     for (ix, (label, target)) in crumbs.into_iter().enumerate().skip(first) {
         let is_root = label == "/";
         let (hover_bg, hover_fg) = (t.surface_2, t.fg);
+        let crumb = div().id(("crumb", ix));
+        // Every ancestor is a drop target; the current folder itself is not.
+        let crumb =
+            if ix == last { crumb } else { crate::file_view::as_drop_target(app, crumb, target.clone(), cx) };
         row = row.child(
-            div()
-                .id(("crumb", ix))
+            crumb
                 .flex_none()
                 .px(px(6.))
                 .py(px(2.))
