@@ -428,7 +428,20 @@ pub fn render(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> 
     // The kit's hover fill is surface-2, which is the panel's own background: use surface here.
     let bordered = |id: &'static str, ic: Icon| {
         let hover_bg = t.surface;
-        ui::icon_button_sized(id, ic, 30., 14., cx).border_1().border_color(t.line).hover(move |s| s.bg(hover_bg))
+        // Not `ui::icon_button`: it already sets a hover style and GPUI panics on a second one.
+        div()
+            .id(id)
+            .size(px(30.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .rounded(t.radius_control)
+            .cursor_pointer()
+            .border_1()
+            .border_color(t.line)
+            .hover(move |s| s.bg(hover_bg))
+            .child(crate::icons::icon(ic, 14.).text_color(t.fg))
     };
     let header = div()
         .h(px(HEADER_H))
