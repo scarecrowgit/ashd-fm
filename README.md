@@ -28,3 +28,7 @@ packaging/integrate.sh --undo
 ```
 
 Key bindings: press `?` in the app. Code layout and conventions: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## License
+
+MIT, see [LICENSE](LICENSE). `vendor/xattr` keeps its own MIT/Apache-2.0 licence.
