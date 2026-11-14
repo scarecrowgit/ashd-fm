@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=fm
+Name=ashd-fm
 GenericName=File Manager
-Exec=fm %U
-Icon=fm
+Exec=ashd-fm %U
+Icon=ashd-fm
 Terminal=false
 Categories=System;FileTools;FileManager;
 MimeType=inode/directory;
-StartupWMClass=fm
+StartupWMClass=ashd-fm
 StartupNotify=true

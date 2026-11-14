@@ -514,24 +514,36 @@ fn config_home() -> PathBuf {
         .unwrap_or_else(|| fs_model::home_dir().join(".config"))
 }
 
+/// `~/.config/ashd-fm/<name>`; until that file exists, reads fall back to the file the app
+/// kept under its old name (`~/.config/fm/<name>`), and the next save writes the new one.
+fn config_file(name: &str) -> PathBuf {
+    config_home().join("ashd-fm").join(name)
+}
+
+fn read_config_file(name: &str) -> String {
+    fs::read_to_string(config_file(name))
+        .or_else(|_| fs::read_to_string(config_home().join("fm").join(name)))
+        .unwrap_or_default()
+}
+
 fn bookmarks_file() -> PathBuf {
-    config_home().join("fm/bookmarks")
+    config_file("bookmarks")
 }
 
 fn tags_file() -> PathBuf {
-    config_home().join("fm/tags")
+    config_file("tags")
 }
 
 fn read_config() -> Config {
     let mut bookmarks: Vec<PathBuf> = Vec::new();
-    for line in fs::read_to_string(bookmarks_file()).unwrap_or_default().lines() {
+    for line in read_config_file("bookmarks").lines() {
         let path = PathBuf::from(line);
         if path.is_absolute() && !bookmarks.contains(&path) {
             bookmarks.push(path);
         }
     }
     let mut tags: Vec<Tag> = Vec::new();
-    for line in fs::read_to_string(tags_file()).unwrap_or_default().lines() {
+    for line in read_config_file("tags").lines() {
         let Some((name, path)) = line.split_once('\t') else { continue };
         let path = PathBuf::from(path);
         if name.is_empty() || !path.is_absolute() || tags.iter().any(|t| t.name.as_ref() == name && t.path == path) {

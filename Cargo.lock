@@ -152,6 +152,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ashd-fm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bzip2",
+ "chrono",
+ "flate2",
+ "gpui",
+ "imagesize",
+ "libc",
+ "pulldown-cmark",
+ "rust-embed",
+ "smol",
+ "tar",
+ "trash",
+ "unicode-segmentation",
+ "xz2",
+ "zbus",
+ "zip",
+ "zstd",
+]
+
+[[package]]
 name = "ashpd"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1744,29 +1767,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fm"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bzip2",
- "chrono",
- "flate2",
- "gpui",
- "imagesize",
- "libc",
- "pulldown-cmark",
- "rust-embed",
- "smol",
- "tar",
- "trash",
- "unicode-segmentation",
- "xz2",
- "zbus",
- "zip",
- "zstd",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2148,8 +2148,6 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "979b45cfa6ec723b6f42330915a1b3769b930d02b2d505f9697f8ca602bee707"
 dependencies = [
  "anyhow",
  "as-raw-xcb-connection",

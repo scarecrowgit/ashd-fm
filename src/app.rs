@@ -632,7 +632,7 @@ impl Render for FmApp {
         }
         let title = match &self.picker {
             Some(picker) => format!("{} — fm", picker.title()),
-            None => format!("fm — {}", fs_model::display_path(self.cwd())),
+            None => format!("ashd-fm — {}", fs_model::display_path(self.cwd())),
         };
         window.set_window_title(&title);
 

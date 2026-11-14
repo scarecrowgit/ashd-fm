@@ -1,5 +1,5 @@
-//! `fm --dbus-service`: owns `org.freedesktop.FileManager1` on the session bus so that
-//! "Show in folder" / "Open containing folder" in browsers, chat apps etc. opens fm with
+//! `ashd-fm --dbus-service`: owns `org.freedesktop.FileManager1` on the session bus so that
+//! "Show in folder" / "Open containing folder" in browsers, chat apps etc. opens ashd-fm with
 //! the item under the cursor. D-Bus-activated through the service file in packaging/.
 
 use std::{path::PathBuf, process::Command};

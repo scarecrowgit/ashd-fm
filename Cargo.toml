@@ -1,5 +1,5 @@
 [package]
-name = "fm"
+name = "ashd-fm"
 version = "0.1.0"
 edition = "2024"
 
@@ -34,3 +34,6 @@ opt-level = 2
 # dropped on Linux. vendor/xattr is that release with the constant mapped to ENODATA.
 [patch.crates-io]
 xattr = { path = "vendor/xattr" }
+# gpui 0.2.2 plus a Wayland drag source (Window::start_external_drag), so files can be
+# dragged out of the window into other applications. Changes are marked "ashd-fm patch".
+gpui = { path = "vendor/gpui" }

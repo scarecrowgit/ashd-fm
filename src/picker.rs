@@ -172,7 +172,7 @@ fn finish(app: &mut FmApp, paths: Vec<PathBuf>, cx: &mut Context<FmApp>) {
     let Some(picker) = &app.picker else { return };
     let text: String = paths.iter().map(|p| format!("{}\n", p.display())).collect();
     if let Err(err) = std::fs::write(&picker.out, text) {
-        eprintln!("fm: cannot write {}: {err}", picker.out.display());
+        eprintln!("ashd-fm: cannot write {}: {err}", picker.out.display());
     }
     cx.quit();
 }

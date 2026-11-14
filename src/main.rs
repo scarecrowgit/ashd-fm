@@ -1,4 +1,4 @@
-//! fm — the rice file manager (GPUI). See ARCHITECTURE.md for the module map.
+//! ashd-fm — the rice file manager (GPUI). See ARCHITECTURE.md for the module map.
 
 #![allow(dead_code)] // contracts are wider than the stubs use; remove once modules land
 
@@ -30,9 +30,9 @@ use gpui::{App, Application, Bounds, WindowBounds, WindowOptions, prelude::*, px
 use crate::theme::{Theme, ThemeName};
 
 fn main() {
-    // fm [--theme ash|ink|midnight|moss|dusk] [--select] [path | file:// URI]
-    // fm --pick --out FILE [--multiple | --directory | --save] [path]   (file-chooser mode)
-    // fm --dbus-service                                                  (org.freedesktop.FileManager1)
+    // ashd-fm [--theme ash|ink|midnight|moss|dusk] [--select] [path | file:// URI]
+    // ashd-fm --pick --out FILE [--multiple | --directory | --save] [path]   (file-chooser mode)
+    // ashd-fm --dbus-service                                                 (org.freedesktop.FileManager1)
     let mut theme = ThemeName::Ash;
     let mut target: Option<PathBuf> = None;
     let mut select = false;
@@ -49,7 +49,7 @@ fn main() {
             "--save" => kind = picker::PickKind::Save,
             "--dbus-service" => {
                 if let Err(err) = dbus_service::run() {
-                    eprintln!("fm: D-Bus service failed: {err}");
+                    eprintln!("ashd-fm: D-Bus service failed: {err}");
                     std::process::exit(1);
                 }
                 return;
@@ -60,7 +60,7 @@ fn main() {
     let pick = match (pick, out) {
         (true, Some(out)) => Some((kind, out)),
         (true, None) => {
-            eprintln!("fm: --pick needs --out FILE");
+            eprintln!("ashd-fm: --pick needs --out FILE");
             std::process::exit(2);
         }
         _ => None,
@@ -108,7 +108,7 @@ fn main() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: None,
                 // A separate app id lets the compositor float the chooser (see packaging/).
-                app_id: Some(if picking { "fm-picker" } else { "fm" }.into()),
+                app_id: Some(if picking { "ashd-fm-picker" } else { "ashd-fm" }.into()),
                 window_min_size: Some(size(px(480.), px(360.))),
                 ..Default::default()
             },

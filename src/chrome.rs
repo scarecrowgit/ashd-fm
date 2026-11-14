@@ -29,7 +29,7 @@ pub fn titlebar(app: &mut FmApp, _window: &mut Window, cx: &mut Context<FmApp>) 
             div()
                 .flex()
                 .gap(px(8.))
-                .child("fm")
+                .child("ashd-fm")
                 // SAFETY: geteuid has no preconditions.
                 .when(unsafe { libc::geteuid() } == 0, |d| d.child(div().text_color(t.err).child("ROOT"))),
         )
