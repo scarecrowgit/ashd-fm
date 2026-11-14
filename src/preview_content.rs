@@ -1495,7 +1495,7 @@ pub enum ArchiveFormat {
 
 impl ArchiveFormat {
     /// Format and the length of the archive suffix (`.tar.gz` → 7), by file name.
-    fn detect(name: &str) -> Option<(ArchiveFormat, usize)> {
+    pub(crate) fn detect(name: &str) -> Option<(ArchiveFormat, usize)> {
         const SUFFIXES: [(&str, ArchiveFormat); 12] = [
             (".tar.gz", ArchiveFormat::TarGz),
             (".tgz", ArchiveFormat::TarGz),
@@ -1529,7 +1529,7 @@ impl ArchiveFormat {
 
 /// Can `extract_archive` unpack this file (by name)?
 pub fn can_extract(path: &Path) -> bool {
-    path.file_name().and_then(|n| ArchiveFormat::detect(&n.to_string_lossy())).is_some()
+    path.file_name().and_then(|n| crate::ops::extract::detect(&n.to_string_lossy())).is_some()
 }
 
 /// `dots.tar.zst` → `dots`.
@@ -1586,7 +1586,7 @@ impl<R: Read> Read for DeadlineReader<R> {
     }
 }
 
-fn tar_reader(format: ArchiveFormat, file: fs::File) -> io::Result<Box<dyn Read>> {
+pub(crate) fn tar_reader(format: ArchiveFormat, file: fs::File) -> io::Result<Box<dyn Read>> {
     let file = io::BufReader::with_capacity(64 * 1024, file);
     Ok(match format {
         ArchiveFormat::Tar | ArchiveFormat::Zip => Box::new(file),
@@ -1735,72 +1735,10 @@ fn load_archive(entry: &Entry, packed: u64) -> PreviewBody {
     }
 }
 
-/// First of `name`, `name 2`, `name 3` … that does not exist in `dir`.
-fn unique_child(dir: &Path, name: &str) -> PathBuf {
-    let first = dir.join(name);
-    if fs::symlink_metadata(&first).is_err() {
-        return first;
-    }
-    (2..)
-        .map(|n| dir.join(format!("{name} {n}")))
-        .find(|p| fs::symlink_metadata(p).is_err())
-        .unwrap_or(first)
-}
-
 /// Extract `archive` into `dest_dir` and return the path that now holds its contents.
-/// BLOCKING. Nothing existing is overwritten: the archive is unpacked into a hidden staging
-/// folder first; a single top-level entry is then moved next to the archive under its own
-/// name, anything else ends up in a new folder named after the archive stem (`name 2` … on
-/// collisions).
+/// BLOCKING. The work is done by `ops::extract` (shared with the context menu and `e`).
 pub fn extract_archive(archive: &Path, dest_dir: &Path) -> Result<PathBuf, String> {
-    let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let (format, _) = ArchiveFormat::detect(&name).ok_or_else(|| "unsupported archive format".to_string())?;
-    let file = fs::File::open(archive).map_err(|e| io_message(&e))?;
-    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
-    let staging = unique_child(dest_dir, &format!(".fm-extract-{}-{nonce:x}", std::process::id()));
-    fs::create_dir(&staging).map_err(|e| io_message(&e))?;
-
-    let unpacked: Result<(), String> = if format == ArchiveFormat::Zip {
-        zip::ZipArchive::new(io::BufReader::new(file))
-            .and_then(|mut zip| zip.extract(&staging))
-            .map_err(|e| e.to_string())
-    } else {
-        tar_reader(format, file)
-            .and_then(|reader| {
-                let mut tar = tar::Archive::new(reader);
-                tar.unpack(&staging)
-            })
-            .map_err(|e| e.to_string())
-    };
-    let finish = || -> Result<PathBuf, String> {
-        unpacked?;
-        let children: Vec<PathBuf> = fs::read_dir(&staging)
-            .map_err(|e| io_message(&e))?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .take(2)
-            .collect();
-        match children.as_slice() {
-            [] => Err("the archive is empty".into()),
-            [only] => {
-                let child_name = only.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                let target = unique_child(dest_dir, &child_name);
-                fs::rename(only, &target).map_err(|e| io_message(&e))?;
-                let _ = fs::remove_dir(&staging);
-                Ok(target)
-            }
-            _ => {
-                let target = unique_child(dest_dir, &archive_stem(&name));
-                fs::rename(&staging, &target).map_err(|e| io_message(&e))?;
-                Ok(target)
-            }
-        }
-    };
-    let result = finish();
-    if result.is_err() {
-        let _ = fs::remove_dir_all(&staging);
-    }
-    result
+    crate::ops::extract::extract_into(archive, dest_dir)
 }
 
 // ─────────────────────────────────────────────── tests ─────────────────────────────────────────
@@ -2193,11 +2131,11 @@ mod tests {
         assert_eq!(first, dir.join("dots"));
         assert_eq!(fs::read(first.join("niri/config.kdl")).unwrap(), b"gaps 12\n");
         let second = extract_archive(&dir.join("dots.tar.gz"), dir).unwrap();
-        assert_eq!(second, dir.join("dots 2"));
+        assert_eq!(second, dir.join("dots (1)"));
         let packed = extract_archive(&zip_path, dir).unwrap();
         assert_eq!(packed, dir.join("pack"));
         assert_eq!(fs::read(packed.join("sub/two.txt")).unwrap(), b"two");
-        assert!(fs::read_dir(dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".fm-extract")));
+        assert!(fs::read_dir(dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains("ashd-fm-extract")));
 
         // Truncated and garbage archives: an error or a partial listing, never a panic.
         let gz_bytes = fs::read(dir.join("dots.tar.gz")).unwrap();
@@ -2210,7 +2148,7 @@ mod tests {
             assert!(matches!(data.body, PreviewBody::Archive { .. } | PreviewBody::Error(_)), "{name}: {:?}", data.body);
         }
         assert!(extract_archive(&dir.join("junk.zip"), dir).is_err());
-        assert!(fs::read_dir(dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".fm-extract")));
+        assert!(fs::read_dir(dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains("ashd-fm-extract")));
     }
 
     #[test]

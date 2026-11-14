@@ -1,4 +1,4 @@
-# fm — architecture & working rules
+# ashd-fm — architecture & working rules
 
 Rust + [GPUI](https://gpui.rs) 0.2.2 implementation of `../SPEC.md` (the spec wins over the
 prototype). Pixel/behaviour reference: `../prototype/*.html` (inline-styled HTML; grep it for
@@ -14,6 +14,13 @@ NixOS, no global Rust: everything runs through the shell.
 
 `vendor/xattr` + `[patch.crates-io]` exist only to fix a libc incompatibility in a gpui
 dependency — leave them alone.
+
+`vendor/gpui` is gpui 0.2.2 with one addition, every change marked `ashd-fm patch`:
+`Window::start_external_drag(&[PathBuf])` (+ `is_external_drag_active`) hands the pointer drag
+in progress to the Wayland compositor as a `text/uri-list` drag source (Copy action), so
+files can be dropped into other applications. `file_view/dnd.rs::drag_move_window` calls it
+when an in-app drag reaches the window edge. A drag of ours that re-enters our own window is
+ignored by the data-device handler (no drop onto ourselves). X11 / other platforms: no-op.
 
 ## One root view, one file per region
 
@@ -116,16 +123,18 @@ Source + examples (read them, don't guess the API):
 
 ## Packaging
 
-`packaging/` holds the app icon (`hicolor/` theme tree, `fm.svg` source — the rice folder
-glyph) and `fm.desktop`. `packaging/install.sh` builds a release binary and installs it with
+`packaging/` holds the app icon (`hicolor/` theme tree, `ashd-fm.svg` source — the rice folder
+glyph) and `ashd-fm.desktop`. `packaging/install.sh` builds a release binary and installs it with
 the launcher entry and icon into `~/.local` (`--uninstall` removes them). The window's
-`app_id` is `fm`, which is how Wayland compositors match it to `fm.desktop` and its icon.
+`app_id` is `ashd-fm`, which is how Wayland compositors match it to `ashd-fm.desktop` and its
+icon. Bookmarks and tags live in `~/.config/ashd-fm/`; the old `~/.config/fm/` files are still
+read until the first save.
 
 ### Desktop integration
 
-`packaging/integrate.sh` (user-level, `--undo` reverts) makes the installed fm:
-the `inode/directory` handler; the owner of `org.freedesktop.FileManager1` (`fm --dbus-service`,
+`packaging/integrate.sh` (user-level, `--undo` reverts) makes the installed ashd-fm:
+the `inode/directory` handler; the owner of `org.freedesktop.FileManager1` (`ashd-fm --dbus-service`,
 src/dbus_service.rs — "Show in folder"); the file dialog of portal-aware apps
-(xdg-desktop-portal-termfilechooser → `packaging/portal-wrapper.sh` → `fm --pick`,
-src/picker.rs); and the `Super+E` target in niri (chooser windows have app id `fm-picker`
-and float).
+(xdg-desktop-portal-termfilechooser → `packaging/portal-wrapper.sh` → `ashd-fm --pick`,
+src/picker.rs); and the `Super+E` target in niri (chooser windows have app id `ashd-fm-picker`
+and float). Re-running it after the rename replaces the old `fm` entries and niri block.

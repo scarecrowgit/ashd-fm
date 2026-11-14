@@ -340,6 +340,11 @@ pub fn show_toast(app: &mut FmApp, toast: Toast, cx: &mut Context<FmApp>) {
 }
 
 /// Plain confirmation toast: "3 files copied to clipboard".
+/// Start the user's terminal (`$TERMINAL`, else the first one installed) in `dir`.
+pub fn open_terminal(app: &mut FmApp, dir: &std::path::Path, cx: &mut Context<FmApp>) {
+    menu::open_terminal(app, dir, cx);
+}
+
 pub fn toast(app: &mut FmApp, text: impl Into<SharedString>, cx: &mut Context<FmApp>) {
     show_toast(app, Toast { text: text.into(), error: false, open: None, undo: None }, cx);
 }
@@ -608,6 +613,7 @@ const KEY_HINTS: [HintColumn; 3] = [
             (&["ctrl /"], "recursive search"),
             (&["ctrl t", "ctrl w"], "new / close tab"),
             (&["ctrl tab"], "next tab · shift for previous"),
+            (&["t", "F4"], "terminal in this folder"),
         ],
     ),
     (
@@ -617,6 +623,7 @@ const KEY_HINTS: [HintColumn; 3] = [
             (&["y"], "copy"),
             (&["x"], "cut"),
             (&["p"], "paste"),
+            (&["e"], "extract archive here"),
             (&["d", "del"], "move to trash"),
             (&["shift d"], "delete permanently"),
             (&["shift ↑", "shift ↓"], "extend selection"),

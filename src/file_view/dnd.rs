@@ -7,8 +7,8 @@ use std::{
 };
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, Context, FontWeight, Modifiers, Pixels, Point, SharedString, Window,
-    div, prelude::*, px,
+    Animation, AnimationExt, AnyElement, Context, DragMoveEvent, FontWeight, Modifiers, Pixels, Point, SharedString,
+    Window, div, prelude::*, px,
 };
 
 use crate::{
@@ -140,6 +140,29 @@ pub fn hover(app: &mut FmApp, path: &Path, inside: bool, droppable: bool, cx: &m
         app.files.drop.generation += 1;
         cx.notify();
     }
+}
+
+/// A drag that reaches the window edge leaves the app: it is handed to the compositor as a
+/// file drag (`text/uri-list`), so it can be dropped into a browser, chat, editor, terminal….
+/// The edge itself counts, for windows that sit against a screen edge.
+pub fn drag_move_window(app: &mut FmApp, ev: &DragMoveEvent<DragPayload>, window: &mut Window, cx: &mut Context<FmApp>) {
+    let pos = ev.event.position;
+    let size = window.viewport_size();
+    let at_edge =
+        pos.x <= px(0.) || pos.y <= px(0.) || pos.x >= size.width - px(1.) || pos.y >= size.height - px(1.);
+    if !at_edge {
+        return;
+    }
+    let paths = ev.drag(cx).paths.clone();
+    if !window.start_external_drag(&paths) {
+        return; // not on Wayland, or no data device: the drag simply stays in the window
+    }
+    // From here the compositor owns the gesture; the button release goes to the drop target.
+    cx.stop_active_drag(window);
+    app.files.drop.target = None;
+    app.files.drop.generation += 1;
+    app.files.marquee.press_on_handle = false;
+    cx.notify();
 }
 
 /// The payload was released over the folder `dest`.

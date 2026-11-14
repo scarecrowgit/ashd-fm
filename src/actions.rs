@@ -53,6 +53,8 @@ actions!(
         Refresh,
         NextTheme,
         PickerAccept,
+        Extract,
+        OpenTerminal,
         Quit,
     ]
 );
@@ -119,6 +121,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-r", Refresh, ANY),
         KeyBinding::new("ctrl-shift-t", NextTheme, ANY),
         KeyBinding::new("ctrl-enter", PickerAccept, ANY),
+        KeyBinding::new("e", Extract, LIST),
+        KeyBinding::new("t", OpenTerminal, LIST),
+        KeyBinding::new("f4", OpenTerminal, ANY),
         KeyBinding::new("ctrl-q", Quit, ANY),
     ]);
     crate::text_input::bind_keys(cx);

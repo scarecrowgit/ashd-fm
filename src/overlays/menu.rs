@@ -62,6 +62,7 @@ enum Cmd {
     CopyPath,
     AddTag(&'static str),
     Compress,
+    Extract,
     Properties,
     Trash,
     NewFile,
@@ -188,22 +189,32 @@ fn find_terminal() -> Option<String> {
     let from_env = std::env::var("TERMINAL").ok().and_then(|t| t.split_whitespace().next().map(str::to_string));
     from_env
         .into_iter()
-        .chain(["foot", "kitty", "alacritty", "wezterm"].map(str::to_string))
+        .chain(["foot", "kitty", "alacritty", "wezterm", "ghostty", "konsole", "gnome-terminal"].map(str::to_string))
         .find(|program| on_path(program).is_some())
 }
 
-fn file_rows(is_dir: bool, caps: &Caps) -> Vec<Row> {
-    vec![
+fn file_rows(path: &Path, is_dir: bool, caps: &Caps) -> Vec<Row> {
+    let mut rows = vec![
         Row::Item(Item::new(Icon::Folder, "Open", Cmd::Open).hint("↵")),
         Row::Item(Item::new(Icon::Code, "Open with", Cmd::Sub(SubKind::OpenWith)).disabled(is_dir)),
         Row::Item(Item::new(Icon::Pencil, "Rename", Cmd::Rename).hint("r")),
         Row::Item(Item::new(Icon::Clipboard, "Copy path", Cmd::CopyPath).hint("ctrl+c")),
         Row::Item(Item::new(Icon::Tag, "Add tag", Cmd::Sub(SubKind::Tags))),
+    ];
+    if !is_dir && ops::extract::is_archive(path) {
+        rows.push(Row::Item(Item::new(Icon::Download, "Extract here", Cmd::Extract).hint("e")));
+    }
+    rows.extend([
         Row::Item(Item::new(Icon::Archive, "Compress…", Cmd::Compress).disabled(!caps.tar)),
+        Row::Item(
+            Item::new(Icon::Terminal, if is_dir { "Open terminal in folder" } else { "Open terminal here" }, Cmd::Terminal)
+                .disabled(caps.terminal.is_none()),
+        ),
         Row::Item(Item::new(Icon::Sliders, "Properties", Cmd::Properties)),
         Row::Sep,
         Row::Item(Item::new(Icon::Trash, "Move to trash", Cmd::Trash).hint("d").destructive()),
-    ]
+    ]);
+    rows
 }
 
 fn empty_rows(app: &FmApp) -> Vec<Row> {
@@ -214,21 +225,30 @@ fn empty_rows(app: &FmApp) -> Vec<Row> {
         Row::Item(Item::new(Icon::Clipboard, "Paste", Cmd::Paste).hint("p").disabled(!app.ops.has_clipboard())),
         Row::Item(
             Item::new(Icon::Terminal, "Open terminal here", Cmd::Terminal)
+                .hint("t")
                 .disabled(app.overlays.caps.terminal.is_none()),
         ),
         Row::Item(if app.show_hidden { hidden } else { hidden.lead(Lead::Blank) }),
     ]
 }
 
-fn selection_rows(caps: &Caps) -> Vec<Row> {
-    vec![
+fn selection_rows(paths: &[PathBuf], caps: &Caps) -> Vec<Row> {
+    let archives = paths.iter().filter(|p| ops::extract::is_archive(p)).count();
+    let mut rows = vec![
         Row::Item(Item::new(Icon::Copy, "Copy", Cmd::Copy).hint("y")),
         Row::Item(Item::new(Icon::Move, "Cut", Cmd::Cut).hint("x")),
         Row::Item(Item::new(Icon::Clipboard, "Copy paths", Cmd::CopyPath)),
+    ];
+    if archives > 0 {
+        let label = if archives == 1 { "Extract archive here".to_string() } else { format!("Extract {archives} archives here") };
+        rows.push(Row::Item(Item::new(Icon::Download, label, Cmd::Extract).hint("e")));
+    }
+    rows.extend([
         Row::Item(Item::new(Icon::Archive, "Compress…", Cmd::Compress).disabled(!caps.tar)),
         Row::Sep,
         Row::Item(Item::new(Icon::Trash, "Move to trash", Cmd::Trash).hint("d").destructive()),
-    ]
+    ]);
+    rows
 }
 
 fn sub_rows(menu: &Menu, kind: SubKind) -> Vec<Row> {
@@ -299,13 +319,15 @@ pub(super) fn open(
         MenuTarget::Entry(path) => {
             let is_dir = app.tab().entries.iter().find(|e| e.path == path).is_some_and(|e| e.is_dir);
             let header = ops::name_of(&path);
-            (vec![path], is_dir, header, file_rows(is_dir, &caps))
+            let rows = file_rows(&path, is_dir, &caps);
+            (vec![path], is_dir, header, rows)
         }
         MenuTarget::Empty => (Vec::new(), false, crate::fs_model::short_name(&dir), empty_rows(app)),
         MenuTarget::Selection => {
             let paths = app.tab().targets();
             let header = ops::plural(paths.len() as u64, "item");
-            (paths, false, header, selection_rows(&caps))
+            let rows = selection_rows(&paths, &caps);
+            (paths, false, header, rows)
         }
     };
     // Look the "Open with" candidates up while the menu is already on screen.
@@ -525,13 +547,21 @@ fn run(app: &mut FmApp, cmd: Cmd, menu: Menu, window: &mut Window, cx: &mut Cont
             }
         }
         Cmd::Compress => compress(app, menu.paths, cx),
+        Cmd::Extract => ops::extract::extract(app, menu.paths, cx),
         Cmd::Properties => {
             if let Some(path) = first {
                 dialogs::open_properties(app, path, window, cx);
             }
         }
         Cmd::Trash => ops::trash_paths(app, menu.paths, cx),
-        Cmd::Terminal => open_terminal(app, &menu.dir, cx),
+        Cmd::Terminal => {
+            // A folder's own menu opens the terminal inside it; anything else, where it lies.
+            let dir = match first {
+                Some(path) if menu.is_dir => path,
+                _ => menu.dir.clone(),
+            };
+            open_terminal(app, &dir, cx)
+        }
         Cmd::NewFile => window.dispatch_action(Box::new(actions::NewFile), cx),
         Cmd::NewFolder => window.dispatch_action(Box::new(actions::NewFolder), cx),
         Cmd::Paste => window.dispatch_action(Box::new(actions::Paste), cx),
@@ -546,7 +576,7 @@ fn is_wezterm(terminal: &str) -> bool {
     Path::new(terminal).file_name().is_some_and(|n| n == "wezterm")
 }
 
-fn open_terminal(app: &mut FmApp, dir: &Path, cx: &mut Context<FmApp>) {
+pub(super) fn open_terminal(app: &mut FmApp, dir: &Path, cx: &mut Context<FmApp>) {
     let Some(terminal) = app.overlays.caps.terminal.clone() else {
         return toast_error(app, "No terminal found · set $TERMINAL", cx);
     };

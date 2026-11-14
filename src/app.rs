@@ -654,6 +654,7 @@ impl Render for FmApp {
 
         div()
             .id("fm-root")
+            .on_drag_move(cx.listener(file_view::dnd::drag_move_window))
             .key_context(key_context)
             .track_focus(&self.focus)
             .relative()
@@ -722,6 +723,14 @@ impl Render for FmApp {
             }))
             .on_action(cx.listener(Self::act_cancel))
             .on_action(cx.listener(|this, _: &PickerAccept, _, cx| picker::accept(this, cx)))
+            .on_action(cx.listener(|this, _: &Extract, _, cx| {
+                let targets = this.tab().targets();
+                ops::extract::extract(this, targets, cx)
+            }))
+            .on_action(cx.listener(|this, _: &OpenTerminal, _, cx| {
+                let dir = this.cwd().to_path_buf();
+                overlays::open_terminal(this, &dir, cx)
+            }))
             // toolbar.rs
             .on_action(cx.listener(toolbar::act_filter))
             .on_action(cx.listener(toolbar::act_recursive_search))

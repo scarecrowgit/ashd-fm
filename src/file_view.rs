@@ -8,7 +8,7 @@
 //! - `rename.rs` — inline rename
 //! - `dnd.rs`    — drag payload, ghost chip, drop targets, spring-open
 
-mod dnd;
+pub mod dnd;
 mod marquee;
 mod rename;
 mod states;

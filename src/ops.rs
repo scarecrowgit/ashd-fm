@@ -4,6 +4,7 @@
 //!
 //! OWNER: ops agent.
 
+pub mod extract;
 mod transfer;
 
 use std::{
