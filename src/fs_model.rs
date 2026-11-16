@@ -289,8 +289,25 @@ pub fn trash_dir() -> PathBuf {
         .join("Trash/files")
 }
 
-/// `/home/me/src/dots` → `~/src/dots`.
+/// Scheme of the virtual "tag view" location: a tab whose `path` is `tag://red` lists every
+/// item tagged `red` (see `FmApp::load_active`). It is not a directory on disk.
+pub const TAG_SCHEME: &str = "tag://";
+
+/// The virtual location listing everything tagged `name`.
+pub fn tag_location(name: &str) -> PathBuf {
+    PathBuf::from(format!("{TAG_SCHEME}{name}"))
+}
+
+/// The tag a virtual tag-view location shows (`tag://red` → `red`); `None` for real paths.
+pub fn tag_of(path: &Path) -> Option<&str> {
+    path.to_str()?.strip_prefix(TAG_SCHEME)
+}
+
+/// `/home/me/src/dots` → `~/src/dots`; a tag view → `Tags › red`.
 pub fn display_path(path: &Path) -> String {
+    if let Some(tag) = tag_of(path) {
+        return format!("Tags › {tag}");
+    }
     let home = home_dir();
     match path.strip_prefix(&home) {
         Ok(rest) if rest.as_os_str().is_empty() => "~".into(),
@@ -313,6 +330,9 @@ pub fn expand_path(input: &str) -> PathBuf {
 
 /// Last path component for tab titles (`/` for the root, `~` for home).
 pub fn short_name(path: &Path) -> String {
+    if let Some(tag) = tag_of(path) {
+        return tag.to_string();
+    }
     if path == home_dir() {
         return "~".into();
     }

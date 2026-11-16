@@ -84,6 +84,12 @@ const THROTTLE: Duration = Duration::from_secs(1);
 /// Must not block: run `git` on the background executor and `cx.notify()` when done.
 pub fn refresh(app: &mut FmApp, cx: &mut Context<FmApp>) {
     let cwd = app.cwd().to_path_buf();
+    if crate::fs_model::tag_of(&cwd).is_some() {
+        // Not a folder: no repository. Drops any result still in flight.
+        app.git = GitState { generation: app.git.generation + 1, ..Default::default() };
+        cx.notify();
+        return;
+    }
     if let Some((last_cwd, at)) = &app.git.last
         && *last_cwd == cwd
         && at.elapsed() < THROTTLE

@@ -139,15 +139,17 @@ pub fn accept(app: &mut FmApp, cx: &mut Context<FmApp>) {
             }
         }
         PickKind::Directory => {
-            let dir = app.cwd().to_path_buf();
-            finish(app, vec![dir], cx);
+            if let Some(dir) = app.real_cwd().map(|d| d.to_path_buf()) {
+                finish(app, vec![dir], cx);
+            }
         }
         PickKind::Save => {
             let name = picker.name_input.read(cx).text().trim().to_string();
             if name.is_empty() || name.contains('/') {
                 return;
             }
-            let path = app.cwd().join(name);
+            let Some(dir) = app.real_cwd() else { return };
+            let path = dir.join(name);
             if path.is_dir() {
                 return app.navigate(path, cx);
             }

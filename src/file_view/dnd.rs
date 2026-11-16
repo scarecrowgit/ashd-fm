@@ -301,7 +301,7 @@ pub fn drop_into(app: &mut FmApp, payload: &DragPayload, dest: PathBuf, window: 
     app.files.drop.target = None;
     app.files.drop.generation += 1;
     cx.notify();
-    if !can_drop(&payload.paths, &dest) {
+    if crate::fs_model::tag_of(&dest).is_some() || !can_drop(&payload.paths, &dest) {
         return;
     }
     // Things that already live in `dest` stay where they are.

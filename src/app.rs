@@ -11,7 +11,7 @@ use std::{
 };
 
 use gpui::{
-    ClipboardItem, Context, FocusHandle, Focusable, KeyContext, SharedString, UniformListScrollHandle,
+    ClipboardItem, Context, FocusHandle, Focusable, KeyContext, UniformListScrollHandle,
     ScrollStrategy, Window, div, prelude::*, px,
 };
 
@@ -144,6 +144,8 @@ impl Tab {
     fn recompute(&mut self, sort: SortSpec, show_hidden: bool) {
         let keep = self.pending_cursor.clone().or_else(|| self.cursor_entry().map(|e| e.path.clone()));
         let needle = self.filter.to_lowercase();
+        // A tag view lists what was tagged on purpose: dotfiles included.
+        let show_hidden = show_hidden || fs_model::tag_of(&self.path).is_some();
         let mut vis: Vec<usize> = (0..self.entries.len())
             .filter(|ix| {
                 let e = &self.entries[*ix];
@@ -230,9 +232,29 @@ impl FmApp {
         &mut self.tabs[self.active_tab]
     }
 
-    /// Current directory of the active tab.
+    /// Current directory of the active tab. In a tag view this is the virtual `tag://name`
+    /// location, which is not on disk: use [`FmApp::real_cwd`] / [`FmApp::in_tag_view`]
+    /// before treating it as a destination.
     pub fn cwd(&self) -> &Path {
         &self.tab().path
+    }
+
+    /// The active tab shows a virtual tag view (`tag://name`) rather than a folder.
+    pub fn in_tag_view(&self) -> bool {
+        fs_model::tag_of(&self.tab().path).is_some()
+    }
+
+    /// The directory of the active tab, or `None` in a tag view. Use it for anything that
+    /// writes into or reads "the current folder" (paste, new file, terminal, search …).
+    pub fn real_cwd(&self) -> Option<&Path> {
+        (!self.in_tag_view()).then(|| self.cwd())
+    }
+
+    /// Re-read the active tab if it is a tag view (call after tags changed).
+    pub fn reload_tag_view(&mut self, cx: &mut Context<Self>) {
+        if self.in_tag_view() {
+            self.load_active(cx);
+        }
     }
 
     pub fn cursor_entry(&self) -> Option<&Entry> {
@@ -303,6 +325,9 @@ impl FmApp {
 
     /// Parent folder, leaving the cursor on the folder we came from.
     pub fn go_parent(&mut self, cx: &mut Context<Self>) {
+        if self.in_tag_view() {
+            return;
+        }
         let from = self.tab().path.clone();
         if let Some(parent) = from.parent().map(Path::to_path_buf) {
             let tab = self.tab_mut();
@@ -333,9 +358,16 @@ impl FmApp {
         if tab.entries.is_empty() {
             tab.load = LoadState::Loading;
         }
+        // A tag view has no directory: its entries are the tagged paths that still exist.
+        let tagged = fs_model::tag_of(&path).map(|name| sidebar::paths_with_tag(self, name));
         let task = cx.background_spawn({
             let path = path.clone();
-            async move { fs_model::read_dir(&path) }
+            async move {
+                match tagged {
+                    Some(paths) => Ok(paths.iter().filter_map(|p| Entry::from_path(p)).collect()),
+                    None => fs_model::read_dir(&path),
+                }
+            }
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -728,14 +760,22 @@ impl Render for FmApp {
                 ops::extract::extract(this, targets, cx)
             }))
             .on_action(cx.listener(|this, _: &OpenTerminal, _, cx| {
-                let dir = this.cwd().to_path_buf();
-                overlays::open_terminal(this, &dir, cx)
+                // In a tag view: the folder of the item under the cursor.
+                let dir = match this.real_cwd() {
+                    Some(dir) => Some(dir.to_path_buf()),
+                    None => this.cursor_entry().and_then(|e| e.path.parent().map(Path::to_path_buf)),
+                };
+                if let Some(dir) = dir {
+                    overlays::open_terminal(this, &dir, cx)
+                }
             }))
             // toolbar.rs
             .on_action(cx.listener(toolbar::act_filter))
             .on_action(cx.listener(toolbar::act_recursive_search))
             .on_action(cx.listener(toolbar::act_edit_path))
             .on_action(cx.listener(toolbar::act_sort_menu))
+            // sidebar.rs
+            .on_action(cx.listener(sidebar::act_toggle_pin))
             // file_view.rs
             .on_action(cx.listener(file_view::act_rename))
             // quicklook.rs
@@ -751,7 +791,6 @@ impl Render for FmApp {
             .on_action(cx.listener(ops::act_new_folder))
             .on_action(cx.listener(overlays::act_key_hints))
             // layout
-            .child(chrome::titlebar(self, window, cx))
             .child(chrome::tabs(self, window, cx))
             .child(body)
             .child(chrome::footer(self, window, cx))
@@ -760,9 +799,4 @@ impl Render for FmApp {
             .children(quicklook::render(self, window, cx))
             .children(overlays::render(self, window, cx))
     }
-}
-
-/// Convenience for modules: `SharedString` of the cwd for display (`~/src/dots`).
-pub fn cwd_label(app: &FmApp) -> SharedString {
-    fs_model::display_path(app.cwd()).into()
 }

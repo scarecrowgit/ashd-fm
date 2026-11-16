@@ -60,7 +60,8 @@ enum Cmd {
     OpenDefault,
     Rename,
     CopyPath,
-    AddTag(&'static str),
+    /// Apply the tag to the targets, or remove it when they all have it already.
+    ToggleTag(&'static str),
     Compress,
     Extract,
     Properties,
@@ -69,6 +70,10 @@ enum Cmd {
     NewFolder,
     Paste,
     Terminal,
+    /// Pin the folder to the sidebar, or unpin it.
+    TogglePin,
+    /// Open the folder in a new tab.
+    OpenInNewTab,
     ToggleHidden,
     Copy,
     Cut,
@@ -92,11 +97,13 @@ struct Item {
     cmd: Cmd,
     destructive: bool,
     disabled: bool,
+    /// Drawn with a check mark (a tag the targets already have).
+    checked: bool,
 }
 
 impl Item {
     fn new(ic: Icon, label: impl Into<SharedString>, cmd: Cmd) -> Self {
-        Item { lead: Lead::Icon(ic), label: label.into(), hint: None, cmd, destructive: false, disabled: false }
+        Item { lead: Lead::Icon(ic), label: label.into(), hint: None, cmd, destructive: false, disabled: false, checked: false }
     }
 
     fn hint(mut self, hint: &'static str) -> Self {
@@ -106,6 +113,11 @@ impl Item {
 
     fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    fn checked(mut self, checked: bool) -> Self {
+        self.checked = checked;
         self
     }
 
@@ -155,6 +167,8 @@ pub(super) struct Menu {
     rows: Vec<Row>,
     highlight: Option<usize>,
     sub: Option<Sub>,
+    /// Tags that every target already has (the tag submenu shows them checked).
+    applied_tags: Vec<&'static str>,
     /// "Open with" candidates; `None` while they are being looked up.
     apps: Option<Vec<AppChoice>>,
     /// Invalidates pending hover timers.
@@ -193,7 +207,7 @@ fn find_terminal() -> Option<String> {
         .find(|program| on_path(program).is_some())
 }
 
-fn file_rows(path: &Path, is_dir: bool, caps: &Caps) -> Vec<Row> {
+fn file_rows(path: &Path, is_dir: bool, pinned: bool, caps: &Caps) -> Vec<Row> {
     let mut rows = vec![
         Row::Item(Item::new(Icon::Folder, "Open", Cmd::Open).hint("↵")),
         Row::Item(Item::new(Icon::Code, "Open with", Cmd::Sub(SubKind::OpenWith)).disabled(is_dir)),
@@ -201,6 +215,9 @@ fn file_rows(path: &Path, is_dir: bool, caps: &Caps) -> Vec<Row> {
         Row::Item(Item::new(Icon::Clipboard, "Copy path", Cmd::CopyPath).hint("ctrl+c")),
         Row::Item(Item::new(Icon::Tag, "Add tag", Cmd::Sub(SubKind::Tags))),
     ];
+    if is_dir {
+        rows.push(Row::Item(pin_item(pinned, true)));
+    }
     if !is_dir && ops::extract::is_archive(path) {
         rows.push(Row::Item(Item::new(Icon::Download, "Extract here", Cmd::Extract).hint("e")));
     }
@@ -217,9 +234,28 @@ fn file_rows(path: &Path, is_dir: bool, caps: &Caps) -> Vec<Row> {
     rows
 }
 
+/// "Pin to sidebar" / "Unpin from sidebar".
+fn pin_item(pinned: bool, hint: bool) -> Item {
+    let item = Item::new(Icon::Pin, if pinned { "Unpin from sidebar" } else { "Pin to sidebar" }, Cmd::TogglePin);
+    if hint { item.hint("ctrl+d") } else { item }
+}
+
+/// Menu of a pinned sidebar item.
+fn pinned_rows(app: &FmApp) -> Vec<Row> {
+    vec![
+        Row::Item(Item::new(Icon::Folder, "Open", Cmd::Open)),
+        Row::Item(Item::new(Icon::Plus, "Open in new tab", Cmd::OpenInNewTab)),
+        Row::Item(
+            Item::new(Icon::Terminal, "Open terminal in folder", Cmd::Terminal).disabled(app.overlays.caps.terminal.is_none()),
+        ),
+        Row::Sep,
+        Row::Item(pin_item(true, false)),
+    ]
+}
+
 fn empty_rows(app: &FmApp) -> Vec<Row> {
     let hidden = Item::new(Icon::Check, "Show hidden", Cmd::ToggleHidden).hint(".");
-    vec![
+    let mut rows = vec![
         Row::Item(Item::new(Icon::File, "New file", Cmd::NewFile)),
         Row::Item(Item::new(Icon::Folder, "New folder", Cmd::NewFolder)),
         Row::Item(Item::new(Icon::Clipboard, "Paste", Cmd::Paste).hint("p").disabled(!app.ops.has_clipboard())),
@@ -229,7 +265,13 @@ fn empty_rows(app: &FmApp) -> Vec<Row> {
                 .disabled(app.overlays.caps.terminal.is_none()),
         ),
         Row::Item(if app.show_hidden { hidden } else { hidden.lead(Lead::Blank) }),
-    ]
+    ];
+    // Not in a tag view: that location is not a folder.
+    if let Some(dir) = app.real_cwd() {
+        rows.push(Row::Sep);
+        rows.push(Row::Item(pin_item(crate::sidebar::is_pinned(app, dir), true)));
+    }
+    rows
 }
 
 fn selection_rows(paths: &[PathBuf], caps: &Caps) -> Vec<Row> {
@@ -238,6 +280,7 @@ fn selection_rows(paths: &[PathBuf], caps: &Caps) -> Vec<Row> {
         Row::Item(Item::new(Icon::Copy, "Copy", Cmd::Copy).hint("y")),
         Row::Item(Item::new(Icon::Move, "Cut", Cmd::Cut).hint("x")),
         Row::Item(Item::new(Icon::Clipboard, "Copy paths", Cmd::CopyPath)),
+        Row::Item(Item::new(Icon::Tag, "Add tag", Cmd::Sub(SubKind::Tags))),
     ];
     if archives > 0 {
         let label = if archives == 1 { "Extract archive here".to_string() } else { format!("Extract {archives} archives here") };
@@ -256,7 +299,10 @@ fn sub_rows(menu: &Menu, kind: SubKind) -> Vec<Row> {
         SubKind::Tags => TAGS
             .iter()
             .enumerate()
-            .map(|(ix, name)| Row::Item(Item::new(Icon::Tag, *name, Cmd::AddTag(name)).lead(Lead::Dot(ix))))
+            .map(|(ix, name)| {
+                let on = menu.applied_tags.contains(name);
+                Row::Item(Item::new(Icon::Tag, *name, Cmd::ToggleTag(name)).lead(Lead::Dot(ix)).checked(on))
+            })
             .collect(),
         SubKind::OpenWith => {
             let mut rows = match &menu.apps {
@@ -319,8 +365,12 @@ pub(super) fn open(
         MenuTarget::Entry(path) => {
             let is_dir = app.tab().entries.iter().find(|e| e.path == path).is_some_and(|e| e.is_dir);
             let header = ops::name_of(&path);
-            let rows = file_rows(&path, is_dir, &caps);
+            let rows = file_rows(&path, is_dir, crate::sidebar::is_pinned(app, &path), &caps);
             (vec![path], is_dir, header, rows)
+        }
+        MenuTarget::Pinned(path) => {
+            let header = crate::fs_model::short_name(&path);
+            (vec![path], true, header, pinned_rows(app))
         }
         MenuTarget::Empty => (Vec::new(), false, crate::fs_model::short_name(&dir), empty_rows(app)),
         MenuTarget::Selection => {
@@ -333,6 +383,15 @@ pub(super) fn open(
     // Look the "Open with" candidates up while the menu is already on screen.
     let has_open_with = rows.iter().any(|r| matches!(r, Row::Item(Item { cmd: Cmd::Sub(SubKind::OpenWith), disabled: false, .. })));
     let lookup = paths.first().filter(|_| has_open_with).cloned();
+    // Tags every target already has.
+    let applied_tags: Vec<&'static str> = TAGS
+        .iter()
+        .copied()
+        .filter(|name| {
+            !paths.is_empty()
+                && paths.iter().all(|p| crate::sidebar::tags_for(app, p).iter().any(|t| t.as_ref() == *name))
+        })
+        .collect();
     app.overlays.menu = Some(Menu {
         seq,
         paths,
@@ -343,6 +402,7 @@ pub(super) fn open(
         rows,
         highlight: None,
         sub: None,
+        applied_tags,
         apps: None,
         hover_token: 0,
     });
@@ -541,9 +601,15 @@ fn run(app: &mut FmApp, cmd: Cmd, menu: Menu, window: &mut Window, cx: &mut Cont
             cx.write_to_clipboard(ClipboardItem::new_string(text));
             toast(app, if menu.paths.len() == 1 { "Path copied" } else { "Paths copied" }, cx);
         }
-        Cmd::AddTag(name) => {
-            for path in menu.paths {
-                super::add_tag(app, path, name, cx);
+        Cmd::ToggleTag(name) => {
+            if menu.applied_tags.contains(&name) {
+                for path in menu.paths {
+                    super::remove_tag(app, path, name, cx);
+                }
+            } else {
+                for path in menu.paths {
+                    super::add_tag(app, path, name, cx);
+                }
             }
         }
         Cmd::Compress => compress(app, menu.paths, cx),
@@ -558,9 +624,22 @@ fn run(app: &mut FmApp, cmd: Cmd, menu: Menu, window: &mut Window, cx: &mut Cont
             // A folder's own menu opens the terminal inside it; anything else, where it lies.
             let dir = match first {
                 Some(path) if menu.is_dir => path,
-                _ => menu.dir.clone(),
+                Some(path) => path.parent().map(Path::to_path_buf).unwrap_or_else(|| menu.dir.clone()),
+                None => menu.dir.clone(),
             };
             open_terminal(app, &dir, cx)
+        }
+        Cmd::TogglePin => {
+            // A folder's own menu pins that folder; the empty-space menu, the current one.
+            let target = if menu.is_dir { first } else { Some(menu.dir.clone()) };
+            if let Some(path) = target {
+                crate::sidebar::toggle_pin(app, &path, cx);
+            }
+        }
+        Cmd::OpenInNewTab => {
+            if let Some(path) = first {
+                app.new_tab(Some(path), cx);
+            }
         }
         Cmd::NewFile => window.dispatch_action(Box::new(actions::NewFile), cx),
         Cmd::NewFolder => window.dispatch_action(Box::new(actions::NewFolder), cx),
@@ -886,6 +965,9 @@ fn panel(
             el = el.child(
                 div().flex_none().font_family(t.font_mono.clone()).text_size(px(10.5)).text_color(t.fg_muted).child(hint),
             );
+        }
+        if item.checked {
+            el = el.child(icon(Icon::Check, 12.).text_color(t.accent));
         }
         if matches!(item.cmd, Cmd::Sub(_)) {
             el = el.child(icon(Icon::ChevronRight, 12.).text_color(t.fg_muted));

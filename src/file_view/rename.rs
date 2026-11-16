@@ -159,7 +159,9 @@ fn commit(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) {
     }
     match fs::rename(&state.path, &dest) {
         Ok(()) => {
+            let old = state.path.clone();
             app.files.rename = None;
+            crate::sidebar::move_tags(app, &[(old, dest.clone())], cx);
             app.reload_and_focus(dest, false, cx);
             app.focus_list(window);
         }

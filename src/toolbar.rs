@@ -92,6 +92,9 @@ pub fn act_filter(app: &mut FmApp, _: &Filter, window: &mut Window, cx: &mut Con
 
 /// `ctrl+/` — recursive search.
 pub fn act_recursive_search(app: &mut FmApp, _: &RecursiveSearch, window: &mut Window, cx: &mut Context<FmApp>) {
+    if app.in_tag_view() {
+        return crate::overlays::toast(app, "Recursive search needs a folder · open one first", cx);
+    }
     search::enter_search(app, window, cx);
 }
 

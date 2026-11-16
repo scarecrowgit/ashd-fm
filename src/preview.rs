@@ -106,7 +106,11 @@ pub fn extract_here(app: &mut FmApp, archive: PathBuf, cx: &mut Context<FmApp>) 
     if app.preview.extracting.is_some() {
         return;
     }
-    let dest = app.cwd().to_path_buf();
+    // In a tag view the archive is unpacked next to itself.
+    let dest = match app.real_cwd() {
+        Some(dir) => dir.to_path_buf(),
+        None => archive.parent().map(std::path::Path::to_path_buf).unwrap_or_default(),
+    };
     app.preview.extracting = Some(archive.clone());
     app.preview.extract_error = None;
     cx.notify();
@@ -120,7 +124,7 @@ pub fn extract_here(app: &mut FmApp, archive: PathBuf, cx: &mut Context<FmApp>) 
             this.preview.extracting = None;
             match result {
                 Ok(path) => {
-                    if this.cwd() == dest.as_path() {
+                    if this.in_tag_view() || this.cwd() == dest.as_path() {
                         this.reload_and_focus(path, false, cx);
                     }
                 }

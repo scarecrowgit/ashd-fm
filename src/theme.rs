@@ -4,7 +4,6 @@
 use gpui::{App, BoxShadow, Global, Hsla, Pixels, SharedString, hsla, point, px, rgb};
 
 // ── layout constants (SPEC §3) ────────────────────────────────────────────────
-pub const TITLEBAR_H: f32 = 28.;
 pub const TABS_H: f32 = 36.;
 pub const SIDEBAR_W: f32 = 230.;
 pub const SIDEBAR_RAIL_W: f32 = 44.;

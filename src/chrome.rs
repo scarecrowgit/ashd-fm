@@ -1,41 +1,16 @@
-//! Window chrome: titlebar 28, tab strip 36, status footer 30, key-hint bar 34 (SPEC §3, §4.6).
+//! Window chrome: tab strip 36, status footer 30, key-hint bar 34 (SPEC §3, §4.6).
 
 use gpui::{AnyElement, Context, MouseButton, SharedString, Window, div, prelude::*, px};
 
 use crate::{
     actions,
-    app::{FmApp, cwd_label},
+    app::FmApp,
     fs_model::format_size,
     icons::Icon,
     sidebar,
     theme::{self, theme},
     ui::{icon_button, keycap, label},
 };
-
-pub fn titlebar(app: &mut FmApp, _window: &mut Window, cx: &mut Context<FmApp>) -> AnyElement {
-    let t = theme(cx);
-    div()
-        .h(px(theme::TITLEBAR_H))
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_between()
-        .px(px(12.))
-        .border_b_1()
-        .border_color(t.line)
-        .font_family(t.font_mono.clone())
-        .text_size(px(11.))
-        .child(
-            div()
-                .flex()
-                .gap(px(8.))
-                .child("ashd-fm")
-                // SAFETY: geteuid has no preconditions.
-                .when(unsafe { libc::geteuid() } == 0, |d| d.child(div().text_color(t.err).child("ROOT"))),
-        )
-        .child(div().text_color(t.fg_muted).child(cwd_label(app)))
-        .into_any_element()
-}
 
 pub fn tabs(app: &mut FmApp, _window: &mut Window, cx: &mut Context<FmApp>) -> AnyElement {
     let t = theme(cx).clone();
@@ -125,8 +100,13 @@ pub fn footer(app: &mut FmApp, _window: &mut Window, cx: &mut Context<FmApp>) ->
         .px(px(14.))
         .border_t_1()
         .border_color(t.line)
-        .bg(t.surface)
-        .child(label(format!("{} items", tab.visible.len()), cx));
+        .bg(t.surface);
+
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } == 0 {
+        row = row.child(div().font_family(t.font_mono.clone()).text_size(px(11.)).text_color(t.err).child("ROOT"));
+    }
+    row = row.child(label(format!("{} items", tab.visible.len()), cx));
 
     if !tab.selected.is_empty() {
         row = row.child(dot()).child(
@@ -139,6 +119,8 @@ pub fn footer(app: &mut FmApp, _window: &mut Window, cx: &mut Context<FmApp>) ->
         .child(label(if app.show_hidden { "hidden on" } else { "hidden off" }, cx))
         .child(div().flex_1());
 
+    // Right-hand parts (git, free space, theme name); joined by separators in the loop below.
+    let mut right: Vec<AnyElement> = Vec::new();
     if let Some(branch) = app.git.branch.clone() {
         let mut text = format!("git {branch}");
         if app.git.ahead > 0 {
@@ -150,15 +132,20 @@ pub fn footer(app: &mut FmApp, _window: &mut Window, cx: &mut Context<FmApp>) ->
         if app.git.modified > 0 {
             text += &format!(" ~{}", app.git.modified);
         }
-        row = row.child(label(text, cx));
+        right.push(label(text, cx).into_any_element());
     }
     if let Some(free) = sidebar::free_space_label(app) {
-        if app.git.branch.is_some() {
+        right.push(label(free, cx).into_any_element());
+    }
+    right.push(label(t.name.label(), cx).into_any_element());
+    // Separators go only between the parts that are actually present.
+    for (ix, part) in right.into_iter().enumerate() {
+        if ix > 0 {
             row = row.child(dot());
         }
-        row = row.child(label(free, cx));
+        row = row.child(part);
     }
-    row.child(dot()).child(label(t.name.label(), cx)).into_any_element()
+    row.into_any_element()
 }
 
 pub fn hint_bar(_app: &mut FmApp, _window: &mut Window, cx: &mut Context<FmApp>) -> AnyElement {

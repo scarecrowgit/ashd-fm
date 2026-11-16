@@ -106,7 +106,8 @@ impl PathBarState {
 // ── behaviour ────────────────────────────────────────────────────────────────
 
 pub(super) fn start_edit(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) {
-    let mut text = fs_model::display_path(app.cwd());
+    // A tag view has no path to edit: start from home.
+    let mut text = fs_model::display_path(app.real_cwd().unwrap_or(&fs_model::home_dir()));
     if !text.ends_with('/') {
         text.push('/');
     }
@@ -393,6 +394,10 @@ fn common_prefix<'a>(mut names: impl Iterator<Item = &'a str>) -> String {
 
 /// Crumbs for `cwd`: label + the ancestor it navigates to. Home collapses to `~`.
 fn crumbs(cwd: &Path) -> Vec<(String, PathBuf)> {
+    // A tag view is one crumb, `Tags › red`, that leads nowhere else.
+    if fs_model::tag_of(cwd).is_some() {
+        return vec![(fs_model::display_path(cwd), cwd.to_path_buf())];
+    }
     let home = fs_model::home_dir();
     let (label, mut acc, rest) = match cwd.strip_prefix(&home) {
         Ok(rest) => ("~", home.clone(), rest),

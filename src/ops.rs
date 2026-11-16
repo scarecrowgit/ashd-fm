@@ -24,6 +24,7 @@ use crate::{
     app::FmApp,
     fs_model,
     overlays::{self, Toast},
+    sidebar,
 };
 
 pub use transfer::{ConflictInfo, FileInfo, Resolution};
@@ -234,7 +235,8 @@ pub fn open_external(path: &Path, _cx: &mut App) {
 }
 
 fn reload_if_showing(app: &mut FmApp, dirs: &[&Path], cx: &mut Context<FmApp>) {
-    if dirs.contains(&app.cwd()) {
+    // A tag view lists items from anywhere: any change may affect it.
+    if app.in_tag_view() || dirs.contains(&app.cwd()) {
         app.reload(cx);
     }
 }
@@ -437,6 +439,10 @@ fn finish_job(app: &mut FmApp, job: Job, result: Result<Outcome, Stop>, cx: &mut
             if outcome.skipped > 0 && !(outcome.items == 0 && kind == TransferKind::Move && outcome.skipped == job.sources.len()) {
                 text += &format!(" · {} skipped", outcome.skipped);
             }
+            if kind == TransferKind::Move {
+                // Tags follow their files.
+                sidebar::move_tags(app, &outcome.moved, cx);
+            }
             let undo = match kind {
                 _ if outcome.created.is_empty() => None,
                 TransferKind::Move => Some(UndoOp::Moved(outcome.moved.clone())),
@@ -448,7 +454,7 @@ fn finish_job(app: &mut FmApp, job: Job, result: Result<Outcome, Stop>, cx: &mut
         Err(Stop::Cancelled) => overlays::toast(app, format!("{} cancelled", kind.noun()), cx),
         Err(Stop::Failed(message)) => overlays::toast_error(app, format!("{} failed · {message}", kind.noun()), cx),
     }
-    if job.touches(app.cwd()) {
+    if app.in_tag_view() || job.touches(app.cwd()) {
         app.reload(cx);
     }
 }
@@ -505,6 +511,11 @@ pub fn resolve_conflict(
 
 /// Reverse a finished operation (the toast's **Undo**). Best effort.
 pub fn undo(_app: &mut FmApp, op: UndoOp, cx: &mut Context<FmApp>) {
+    // Moved items go back where they were, and so do their tags.
+    let moved_back: Vec<(PathBuf, PathBuf)> = match &op {
+        UndoOp::Moved(pairs) => pairs.iter().map(|(from, to)| (to.clone(), from.clone())).collect(),
+        _ => Vec::new(),
+    };
     let task = cx.background_spawn(async move {
         match op {
             UndoOp::Created(paths) => {
@@ -523,7 +534,10 @@ pub fn undo(_app: &mut FmApp, op: UndoOp, cx: &mut Context<FmApp>) {
         let result = task.await;
         this.update(cx, |app, cx| {
             match result {
-                Ok(n) => overlays::toast(app, format!("Undone · {}", plural(n as u64, "item")), cx),
+                Ok(n) => {
+                    sidebar::move_tags(app, &moved_back, cx);
+                    overlays::toast(app, format!("Undone · {}", plural(n as u64, "item")), cx)
+                }
                 Err(message) => overlays::toast_error(app, format!("Undo failed · {message}"), cx),
             }
             app.reload(cx);
@@ -570,11 +584,13 @@ pub fn trash_paths(app: &mut FmApp, paths: Vec<PathBuf>, cx: &mut Context<FmApp>
                 .collect(),
             _ => Vec::new(),
         };
-        (done.len(), error, restorable)
+        (done, error, restorable)
     });
     cx.spawn(async move |this, cx| {
-        let (done, error, restorable) = task.await;
+        let (trashed, error, restorable) = task.await;
         this.update(cx, |app, cx| {
+            let done = trashed.len();
+            sidebar::forget_paths(app, &trashed, cx);
             if done > 0 {
                 let undo = (restorable.len() == done).then_some(UndoOp::Trashed(restorable));
                 let text = format!("Moved {} to trash", plural(done as u64, "item"));
@@ -601,20 +617,25 @@ pub fn delete_permanently(_app: &mut FmApp, paths: Vec<PathBuf>, cx: &mut Contex
     let dirs: Vec<PathBuf> = paths.iter().filter_map(|p| p.parent().map(Path::to_path_buf)).collect();
     let task = cx.background_spawn(async move {
         let mut done = 0u64;
+        let mut gone: Vec<PathBuf> = Vec::new();
         let mut error = None;
         for path in &paths {
             match transfer::remove_tree(path) {
-                Ok(()) => done += 1,
+                Ok(()) => {
+                    done += 1;
+                    gone.push(path.clone());
+                }
                 Err(e) => {
                     error.get_or_insert(format!("{}: {e}", name_of(path)));
                 }
             }
         }
-        (done, error)
+        (done, error, gone)
     });
     cx.spawn(async move |this, cx| {
-        let (done, error) = task.await;
+        let (done, error, gone) = task.await;
         this.update(cx, |app, cx| {
+            sidebar::forget_paths(app, &gone, cx);
             match error {
                 Some(message) => overlays::toast_error(app, format!("Delete failed · {message}"), cx),
                 None => overlays::toast(app, format!("Deleted {}", plural(done, "item")), cx),
@@ -630,7 +651,9 @@ pub fn delete_permanently(_app: &mut FmApp, paths: Vec<PathBuf>, cx: &mut Contex
 // ── new file / folder ────────────────────────────────────────────────────────
 
 fn create_new(app: &mut FmApp, folder: bool, cx: &mut Context<FmApp>) {
-    let dir = app.cwd().to_path_buf();
+    let Some(dir) = app.real_cwd().map(Path::to_path_buf) else {
+        return overlays::toast_error(app, "Open a folder first · a tag view has nowhere to create it", cx);
+    };
     let task = cx.background_spawn({
         let dir = dir.clone();
         async move {
@@ -699,7 +722,9 @@ pub fn act_paste(app: &mut FmApp, _: &Paste, _window: &mut Window, cx: &mut Cont
     let Some(clip) = app.ops.clipboard.clone().filter(|c| !c.paths.is_empty()) else {
         return overlays::toast(app, "Nothing to paste", cx);
     };
-    let dest = app.cwd().to_path_buf();
+    let Some(dest) = app.real_cwd().map(Path::to_path_buf) else {
+        return overlays::toast_error(app, "Open a folder first · cannot paste into a tag view", cx);
+    };
     match clip.mode {
         ClipMode::Copy => start_job(app, clip.paths, dest, TransferKind::Copy, false, cx),
         ClipMode::Cut => start_job(app, clip.paths, dest, TransferKind::Move, true, cx),

@@ -55,6 +55,7 @@ actions!(
         PickerAccept,
         Extract,
         OpenTerminal,
+        TogglePin,
         Quit,
     ]
 );
@@ -124,6 +125,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("e", Extract, LIST),
         KeyBinding::new("t", OpenTerminal, LIST),
         KeyBinding::new("f4", OpenTerminal, ANY),
+        KeyBinding::new("ctrl-d", TogglePin, LIST),
         KeyBinding::new("ctrl-q", Quit, ANY),
     ]);
     crate::text_input::bind_keys(cx);

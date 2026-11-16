@@ -86,6 +86,8 @@ pub enum MenuTarget {
     Empty,
     /// A row that is part of a multi-selection.
     Selection,
+    /// A pinned folder in the sidebar.
+    Pinned(PathBuf),
 }
 
 /// A message above the status bar.
@@ -242,6 +244,11 @@ pub fn open_context_menu(
     cx: &mut Context<FmApp>,
 ) {
     menu::open(app, target, position, window, cx);
+}
+
+/// Whether a context menu is open. Hover tooltips underneath it are suppressed while true.
+pub fn menu_open(app: &FmApp) -> bool {
+    app.overlays.menu.is_some()
 }
 
 /// `?` — toggle the which-key grid.
@@ -553,7 +560,7 @@ fn render_jobs(app: &FmApp, cx: &mut Context<FmApp>) -> Option<AnyElement> {
     Some(
         div()
             .absolute()
-            .top(px(theme::TITLEBAR_H + theme::TABS_H + 6.))
+            .top(px(theme::TABS_H + 6.))
             .right(px(12.))
             .w(px(520.))
             .max_w(relative(0.94))
@@ -614,6 +621,7 @@ const KEY_HINTS: [HintColumn; 3] = [
             (&["ctrl t", "ctrl w"], "new / close tab"),
             (&["ctrl tab"], "next tab · shift for previous"),
             (&["t", "F4"], "terminal in this folder"),
+            (&["ctrl d"], "pin / unpin folder in sidebar"),
         ],
     ),
     (
@@ -686,6 +694,12 @@ fn render_key_hints(app: &FmApp, cx: &mut Context<FmApp>) -> Option<AnyElement> 
         .on_any_mouse_down(cx.listener(move |app, _, window, cx| close(app, window, cx)))
         .child(dialog_surface(860., cx).child(grid));
     Some(fade_in(layer, ("key-hints", app.overlays.seq)))
+}
+
+/// Remove a tag from an item.
+fn remove_tag(app: &mut FmApp, path: PathBuf, name: &'static str, cx: &mut Context<FmApp>) {
+    crate::sidebar::remove_tag(app, &path, name, cx);
+    toast(app, format!("Untagged {} · {name}", ops::name_of(&path)), cx);
 }
 
 /// Tag an item. `name` is one of red / yellow / green / blue / accent.

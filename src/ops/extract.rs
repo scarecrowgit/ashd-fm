@@ -90,6 +90,7 @@ pub fn extract(app: &mut FmApp, paths: Vec<PathBuf>, cx: &mut Context<FmApp>) {
             }
             // Show the result: cursor on it when there is exactly one, else just refresh.
             match done.as_slice() {
+                _ if app.in_tag_view() => app.reload(cx),
                 [one] if one.parent() == Some(app.cwd()) => app.reload_and_focus((*one).clone(), false, cx),
                 _ if archives.iter().any(|a| a.parent() == Some(app.cwd())) => app.reload(cx),
                 _ => {}

@@ -13,10 +13,10 @@ mod marquee;
 mod rename;
 mod states;
 
-use std::{cell::Cell, ops::Range, path::PathBuf, rc::Rc, sync::Arc};
+use std::{cell::Cell, collections::HashMap, ops::Range, path::PathBuf, rc::Rc, sync::Arc};
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Div, DragMoveEvent, Entity, Focusable, HighlightStyle, MouseButton,
+    AnyElement, App, ClickEvent, Context, Div, DragMoveEvent, Entity, Focusable, HighlightStyle, MouseButton, SharedString,
     MouseDownEvent, ObjectFit, Pixels, Point, ScrollStrategy, Stateful, StyledText, Subscription,
     UniformListScrollHandle, Window, canvas, div, img, prelude::*, px, transparent_black, uniform_list,
 };
@@ -125,6 +125,10 @@ struct Frame {
     drop_target: Option<PathBuf>,
     drop_generation: usize,
     renaming: Option<PathBuf>,
+    /// Tag names per tagged path (built once per frame, see `sidebar::tag_map`).
+    tags: HashMap<PathBuf, Vec<SharedString>>,
+    /// The tab shows a tag view: rows also show where each item lives.
+    tag_view: bool,
 }
 
 impl Frame {
@@ -136,6 +140,8 @@ impl Frame {
             drop_target: app.files.drop.target.clone().filter(|_| cx.has_active_drag()),
             drop_generation: app.files.drop.generation,
             renaming: app.files.rename.as_ref().map(|r| r.path.clone()),
+            tags: crate::sidebar::tag_map(app),
+            tag_view: app.in_tag_view(),
         }
     }
 }
@@ -169,6 +175,19 @@ impl Look {
             },
         }
     }
+}
+
+/// Up to three small coloured dots for the tags on an entry (nothing when untagged).
+fn tag_dots(f: &Frame, entry: &Entry) -> Option<Div> {
+    let names = f.tags.get(&entry.path).filter(|n| !n.is_empty())?;
+    Some(div().flex_none().flex().items_center().gap(px(3.)).children(
+        names.iter().take(3).map(|name| div().size(px(8.)).flex_none().rounded_full().bg(crate::sidebar::tag_color(name, &f.t))),
+    ))
+}
+
+/// Folder an entry of a tag view lives in (`~/src/dots`).
+fn parent_label(entry: &Entry) -> String {
+    entry.path.parent().map(fs_model::display_path).unwrap_or_default()
 }
 
 fn entry_icon(entry: &Entry) -> Icon {
@@ -385,6 +404,18 @@ fn list_row(app: &FmApp, row: usize, entry: &Entry, f: &Frame, cx: &mut Context<
             )
             .child(name_text(entry, t)),
         )
+        .when_some(tag_dots(f, entry), |d, dots| d.child(dots))
+        .when(f.tag_view, |d| {
+            d.child(
+                div()
+                    .min_w_0()
+                    .flex_shrink()
+                    .truncate()
+                    .text_size(px(11.))
+                    .text_color(t.fg_muted)
+                    .child(parent_label(entry)),
+            )
+        })
     };
     let meta = |width: f32| div().w(px(width)).flex_none().overflow_hidden().whitespace_nowrap().text_color(t.fg_muted);
     let git = app.git.status_for(&entry.path);
@@ -503,12 +534,21 @@ fn grid_tile(app: &FmApp, row: usize, entry: &Entry, f: &Frame, cx: &mut Context
         el.child(
             div()
                 .h(px(TILE_NAME_H))
-                .line_height(px(TILE_NAME_H))
-                .text_size(px(11.))
-                .text_color(t.fg)
-                .truncate()
-                .when(look.cut, |d| d.italic())
-                .child(entry.display_name()),
+                .flex()
+                .items_center()
+                .gap(px(5.))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_shrink()
+                        .line_height(px(TILE_NAME_H))
+                        .text_size(px(11.))
+                        .text_color(t.fg)
+                        .truncate()
+                        .when(look.cut, |d| d.italic())
+                        .child(entry.display_name()),
+                )
+                .when_some(tag_dots(f, entry), |d, dots| d.child(dots)),
         )
         .child(
             div()
@@ -517,7 +557,11 @@ fn grid_tile(app: &FmApp, row: usize, entry: &Entry, f: &Frame, cx: &mut Context
                 .text_size(px(10.))
                 .text_color(t.fg_muted)
                 .truncate()
-                .child(entry.size_label()),
+                .child(if f.tag_view {
+                    format!("{} · {}", entry.size_label(), parent_label(entry))
+                } else {
+                    entry.size_label()
+                }),
         )
     };
     let el = el.when(look.drop_target, |d| d.child(dnd::outline(t, f.drop_generation, 1., 1.)));
@@ -674,7 +718,8 @@ pub fn render(app: &mut FmApp, window: &mut Window, cx: &mut Context<FmApp>) -> 
         app.files.grid_seen = None;
     }
     let show_header = app.view_mode == ViewMode::List && matches!(body, Body::List | Body::Skeleton);
-    let browsable = !matches!(body, Body::Error | Body::Skeleton);
+    // A tag view has no folder to create in, paste into or drop onto.
+    let browsable = !matches!(body, Body::Error | Body::Skeleton) && !app.in_tag_view();
     let show_selection_bar = !app.tab().selected.is_empty() && matches!(body, Body::List | Body::Grid);
 
     let body = match body {

@@ -97,6 +97,10 @@ fn text(s: impl Into<SharedString>) -> AnyElement {
 
 /// Ready, nothing to show and no filter.
 pub fn empty(app: &FmApp, cx: &mut Context<FmApp>) -> AnyElement {
+    if let Some(tag) = fs_model::tag_of(app.cwd()) {
+        let body = "Tag items from their right-click menu, or drop files on the tag in the sidebar.";
+        return block(Icon::Tag, format!("Nothing tagged {tag}"), text(body), Vec::new(), cx);
+    }
     let hidden = app.tab().entries.len();
     let body = if hidden > 0 {
         let noun = if hidden == 1 { "item" } else { "items" };
@@ -132,6 +136,9 @@ pub fn no_matches(app: &FmApp, cx: &mut Context<FmApp>) -> AnyElement {
         .child("The filter searches this folder.")
         .child(div().flex().items_center().gap(px(6.)).child("Recursive search:").child(keycap("ctrl+/", cx)))
         .into_any_element();
+    if app.in_tag_view() {
+        return block(Icon::Search, title, text("The filter searches the items of this tag."), Vec::new(), cx);
+    }
     let buttons = vec![
         button("state-search-recursive", "Search recursively", ButtonKind::Secondary, cx)
             .on_click(cx.listener(|this, _, window, cx| {
