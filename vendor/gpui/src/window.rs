@@ -1758,14 +1758,19 @@ impl Window {
     /// can accept, carrying `paths` as `text/uri-list` (Wayland only). Call it while the
     /// mouse button is still held, typically once the pointer has left the window. After it
     /// returns `true` the window gets no more pointer events for this gesture (the button
-    /// release goes to the drop target), so stop any in-app drag yourself.
-    pub fn start_external_drag(&self, paths: &[std::path::PathBuf]) -> bool {
+    /// release goes to the drop target), so stop any in-app drag yourself. `icon`, when given,
+    /// follows the pointer for the rest of the drag.
+    pub fn start_external_drag(
+        &self,
+        paths: &[std::path::PathBuf],
+        icon: Option<crate::ExternalDragIcon>,
+    ) -> bool {
         let uri_list = paths
             .iter()
             .filter_map(|path| http_client::Url::from_file_path(path).ok())
             .map(|url| format!("{url}\r\n"))
             .collect::<String>();
-        !uri_list.is_empty() && self.platform_window.start_external_drag(uri_list)
+        !uri_list.is_empty() && self.platform_window.start_external_drag(uri_list, icon)
     }
 
     /// ashd-fm patch: a drag started by [`Window::start_external_drag`] is still running.

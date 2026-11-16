@@ -275,9 +275,12 @@ fn drag_handle(el: Stateful<Div>, entry: &Entry, look: &Look, f: &Frame, cx: &mu
             _ => Arc::new(vec![entry.path.clone()]),
         },
         icon: entry_icon(entry),
+        image: has_thumbnail(entry).then(|| entry.path.clone()),
+        thumb: Default::default(),
     };
     el.on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, _| this.files.marquee.press_on_handle = true))
         .on_drag(payload, |payload: &DragPayload, offset, window, cx| {
+            dnd::load_thumbnail(payload, window.scale_factor(), cx);
             let modifiers = window.modifiers();
             cx.new(|_| DragGhost::new(payload, offset, modifiers))
         })
@@ -441,11 +444,15 @@ fn grid_columns_for(width: f32) -> usize {
     (((width - 2. * GRID_PAD + GRID_GAP) / (GRID_MIN_TILE + GRID_GAP)).floor() as usize).max(1)
 }
 
+/// Grid tiles (and file drags) show this entry's picture rather than its type icon.
+fn has_thumbnail(entry: &Entry) -> bool {
+    entry.file_type == FileType::Image && !entry.is_dir && entry.size > 0 && entry.size <= THUMB_MAX_BYTES
+}
+
 fn thumbnail(row: usize, entry: &Entry, look: &Look, t: &Theme) -> Div {
     let (ic, color, line) = (entry_icon(entry), if look.cursor { t.accent } else { t.fg_muted }, t.line);
     let frame = div().h(px(THUMB_H)).w_full().flex_none().flex().items_center().justify_center().overflow_hidden().bg(t.bg);
-    let is_image = entry.file_type == FileType::Image && !entry.is_dir && entry.size > 0 && entry.size <= THUMB_MAX_BYTES;
-    if !is_image {
+    if !has_thumbnail(entry) {
         return frame.child(icon(ic, 26.).text_color(color));
     }
     frame.child(

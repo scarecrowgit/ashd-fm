@@ -77,6 +77,20 @@ pub(crate) use linux::*;
 #[cfg(target_os = "macos")]
 pub(crate) use mac::*;
 pub use semantic_version::SemanticVersion;
+
+/// ashd-fm patch: the picture shown under the pointer while files are dragged out to other
+/// applications (see `Window::start_external_drag`).
+#[derive(Clone, Debug)]
+pub struct ExternalDragIcon {
+    /// Width in physical pixels.
+    pub width: u32,
+    /// Height in physical pixels.
+    pub height: u32,
+    /// Integer buffer scale: logical size is `width / scale` × `height / scale`.
+    pub scale: u32,
+    /// `width * height` pixels, premultiplied alpha, little-endian ARGB (bytes B, G, R, A).
+    pub bgra: Vec<u8>,
+}
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use test::*;
 #[cfg(target_os = "windows")]
@@ -536,7 +550,7 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn start_window_move(&self) {}
     /// ashd-fm patch: hand the current pointer drag to the compositor as a file drag that
     /// other applications can accept. `false` when the platform cannot do it.
-    fn start_external_drag(&self, _uri_list: String) -> bool {
+    fn start_external_drag(&self, _uri_list: String, _icon: Option<ExternalDragIcon>) -> bool {
         false
     }
     /// ashd-fm patch: a drag started by `start_external_drag` is still in progress.

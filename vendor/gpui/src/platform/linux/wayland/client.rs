@@ -245,6 +245,57 @@ pub(crate) struct WaylandClientState {
 pub struct OutgoingDrag {
     source: wl_data_source::WlDataSource,
     uri_list: String,
+    /// Surface + buffer drawn under the pointer during the drag.
+    icon: Option<(wl_surface::WlSurface, wl_buffer::WlBuffer)>,
+}
+
+impl OutgoingDrag {
+    fn destroy(self) {
+        self.source.destroy();
+        if let Some((surface, buffer)) = self.icon {
+            surface.destroy();
+            buffer.destroy();
+        }
+    }
+}
+
+/// ashd-fm patch: upload `icon` into a shm buffer on a fresh surface, for `start_drag`.
+fn create_drag_icon(
+    globals: &Globals,
+    icon: &crate::ExternalDragIcon,
+) -> Option<(wl_surface::WlSurface, wl_buffer::WlBuffer)> {
+    use std::io::Write;
+    use std::os::fd::{AsFd, FromRawFd, OwnedFd};
+
+    let (width, height) = (icon.width as i32, icon.height as i32);
+    let len = width.checked_mul(height)?.checked_mul(4)?;
+    if width <= 0 || height <= 0 || icon.bgra.len() != len as usize {
+        return None;
+    }
+    let raw = unsafe { libc::memfd_create(c"ashd-fm-drag-icon".as_ptr(), libc::MFD_CLOEXEC) };
+    if raw < 0 {
+        return None;
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+    let mut file = std::fs::File::from(fd);
+    file.write_all(&icon.bgra).ok()?;
+    let pool = globals.shm.create_pool(file.as_fd(), len, &globals.qh, ());
+    let buffer = pool.create_buffer(
+        0,
+        width,
+        height,
+        width * 4,
+        wl_shm::Format::Argb8888,
+        &globals.qh,
+        (),
+    );
+    pool.destroy();
+    let surface = globals.compositor.create_surface(&globals.qh, ());
+    surface.set_buffer_scale(icon.scale.max(1) as i32);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage(0, 0, i32::MAX, i32::MAX);
+    surface.commit();
+    Some((surface, buffer))
 }
 
 pub struct DragState {
@@ -296,7 +347,12 @@ impl WaylandClientStatePtr {
     /// (`text/uri-list`, CRLF-separated `file://` URIs) and the plain paths as text.
     /// Must be called while the pointer button that began the gesture is still held:
     /// the compositor ties the drag to that press's implicit grab.
-    pub fn start_drag(&self, origin: &wl_surface::WlSurface, uri_list: String) -> bool {
+    pub fn start_drag(
+        &self,
+        origin: &wl_surface::WlSurface,
+        uri_list: String,
+        icon: Option<crate::ExternalDragIcon>,
+    ) -> bool {
         let client = self.get_client();
         let mut state = client.borrow_mut();
         let (Some(manager), Some(device)) = (
@@ -306,7 +362,7 @@ impl WaylandClientStatePtr {
             return false;
         };
         if let Some(previous) = state.drag_source.take() {
-            previous.source.destroy();
+            previous.destroy();
         }
         let serial = state.serial_tracker.get(SerialKind::MousePress);
         let source = manager.create_data_source(&state.globals.qh, ());
@@ -316,8 +372,9 @@ impl WaylandClientStatePtr {
         }
         // Copy only: with "move" the source would be expected to delete the files.
         source.set_actions(DndAction::Copy);
-        device.start_drag(Some(&source), origin, None, serial);
-        state.drag_source = Some(OutgoingDrag { source, uri_list });
+        let icon = icon.and_then(|icon| create_drag_icon(&state.globals, &icon));
+        device.start_drag(Some(&source), origin, icon.as_ref().map(|(surface, _)| surface), serial);
+        state.drag_source = Some(OutgoingDrag { source, uri_list, icon });
         true
     }
 
@@ -2146,8 +2203,9 @@ impl Dispatch<wl_data_source::WlDataSource, ()> for WaylandClientStatePtr {
                 state.clipboard.send(mime_type, fd);
             }
             wl_data_source::Event::Cancelled | wl_data_source::Event::DndFinished if is_drag => {
-                state.drag_source = None;
-                data_source.destroy();
+                if let Some(drag) = state.drag_source.take() {
+                    drag.destroy();
+                }
             }
             wl_data_source::Event::Cancelled => {
                 data_source.destroy();

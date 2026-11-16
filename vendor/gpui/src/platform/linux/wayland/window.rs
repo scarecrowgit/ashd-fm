@@ -1049,9 +1049,9 @@ impl PlatformWindow for WaylandWindow {
         state.toplevel._move(&state.globals.seat, serial);
     }
 
-    fn start_external_drag(&self, uri_list: String) -> bool {
+    fn start_external_drag(&self, uri_list: String, icon: Option<crate::ExternalDragIcon>) -> bool {
         let state = self.borrow();
-        state.client.start_drag(&state.surface, uri_list)
+        state.client.start_drag(&state.surface, uri_list, icon)
     }
 
     fn is_external_drag_active(&self) -> bool {
