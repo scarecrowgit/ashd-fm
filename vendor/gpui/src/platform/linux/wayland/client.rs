@@ -291,10 +291,8 @@ fn create_drag_icon(
     );
     pool.destroy();
     let surface = globals.compositor.create_surface(&globals.qh, ());
-    surface.set_buffer_scale(icon.scale.max(1) as i32);
-    surface.attach(Some(&buffer), 0, 0);
-    surface.damage(0, 0, i32::MAX, i32::MAX);
-    surface.commit();
+    // The buffer is attached and committed by `start_drag`, once the surface has its
+    // drag-icon role: a compositor need not keep content committed before the role.
     Some((surface, buffer))
 }
 
@@ -372,8 +370,15 @@ impl WaylandClientStatePtr {
         }
         // Copy only: with "move" the source would be expected to delete the files.
         source.set_actions(DndAction::Copy);
+        let icon_scale = icon.as_ref().map(|icon| icon.scale.max(1) as i32);
         let icon = icon.and_then(|icon| create_drag_icon(&state.globals, &icon));
         device.start_drag(Some(&source), origin, icon.as_ref().map(|(surface, _)| surface), serial);
+        if let (Some((surface, buffer)), Some(scale)) = (&icon, icon_scale) {
+            surface.set_buffer_scale(scale);
+            surface.attach(Some(buffer), 0, 0);
+            surface.damage(0, 0, i32::MAX, i32::MAX);
+            surface.commit();
+        }
         state.drag_source = Some(OutgoingDrag { source, uri_list, icon });
         true
     }

@@ -215,14 +215,16 @@ pub fn drag_move_window(app: &mut FmApp, ev: &DragMoveEvent<DragPayload>, window
 }
 
 /// The picture the compositor shows under the pointer once a drag has left the window: the
-/// dragged file's type icon on a small tile (a second tile peeks out behind it for several
-/// files). Drawn here because the window no longer paints anything for this drag.
+/// dragged file's type icon (or image thumbnail) on a small tile; for several files a second
+/// tile peeks out behind it and an accent badge carries the count. Drawn here because the
+/// window no longer paints anything for this drag.
 fn external_drag_icon(payload: &DragPayload, t: &Theme, scale_factor: f32) -> Option<ExternalDragIcon> {
     const GAP: f32 = 6.; // between the pointer and the tile
     const GLYPH: f32 = 22.;
     const STACK: f32 = 5.; // offset of the tile behind, for several files
 
-    let many = payload.paths.len() > 1;
+    let count = payload.paths.len();
+    let many = count > 1;
     let scale = scale_factor.ceil().max(1.) as u32;
     let s = scale as f32;
     let thumb = payload.thumb.get().and_then(Option::as_ref);
@@ -233,18 +235,17 @@ fn external_drag_icon(payload: &DragPayload, t: &Theme, scale_factor: f32) -> Op
     });
     let tile_size = if thumb.is_some() { THUMB_TILE } else { ICON_TILE };
     let tile_px = tile_size * s;
-    let logical = GAP + tile_size + if many { STACK } else { 0. } + 1.;
-    let size = (logical * s).ceil() as u32;
-    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    let badge = many.then(|| CountBadge::new(count));
+    // The badge sits on the top-right corner of the stack, half outside it.
+    let stack_right = GAP + tile_size + if many { STACK } else { 0. };
+    let badge_x = badge.as_ref().map(|b| stack_right + b.overhang - b.width);
+    let width = badge_x.zip(badge.as_ref()).map_or(stack_right, |(x, b)| (x + b.width).max(stack_right)) + 1.;
+    let height = GAP + tile_size + if many { STACK } else { 0. } + 1.;
+    // Whole logical pixels, so the buffer is a multiple of its scale.
+    let (width, height) = (width.ceil() as u32 * scale, height.ceil() as u32 * scale);
+    let mut pixmap = tiny_skia::Pixmap::new(width, height)?;
 
-    let paint = |color: Hsla| {
-        let c = Rgba::from(color);
-        let mut paint = tiny_skia::Paint::default();
-        paint.set_color(tiny_skia::Color::from_rgba(c.r, c.g, c.b, c.a)?);
-        paint.anti_alias = true;
-        Some(paint)
-    };
-    let (fill, border) = (paint(t.surface)?, paint(t.line)?);
+    let (fill, border) = (solid(t.surface)?, solid(t.line)?);
     let mut tile = |x: f32, y: f32, picture: Option<&tiny_skia::Pixmap>| -> Option<()> {
         let rect = tiny_skia::Rect::from_xywh(x * s, y * s, tile_px, tile_px)?;
         pixmap.fill_rect(rect, &fill, tiny_skia::Transform::identity(), None);
@@ -264,36 +265,112 @@ fn external_drag_icon(payload: &DragPayload, t: &Theme, scale_factor: f32) -> Op
         tile(GAP + STACK, GAP, None)?;
     }
     tile(x, y, thumb.as_ref())?;
-    if thumb.is_some() {
-        return Some(to_drag_icon(pixmap, scale));
-    }
 
-    // The icon SVGs are black strokes that gpui tints; recolour them by hand here.
-    let fg = Rgba::from(t.fg);
-    let hex = format!(
-        "#{:02x}{:02x}{:02x}",
-        (fg.r * 255.).round() as u8,
-        (fg.g * 255.).round() as u8,
-        (fg.b * 255.).round() as u8
-    );
-    let svg = Assets::get(payload.icon.path())?;
-    let svg = String::from_utf8_lossy(&svg.data).replace("stroke=\"#000\"", &format!("stroke=\"{hex}\""));
-    let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).ok()?;
-    let k = GLYPH * s / tree.size().width().max(tree.size().height());
-    let inset = (tile_size - GLYPH) / 2.;
-    let transform = tiny_skia::Transform::from_scale(k, k).post_translate((x + inset) * s, (y + inset) * s);
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    if thumb.is_none() {
+        // The icon SVGs are black strokes that gpui tints; recolour them by hand here.
+        let svg = Assets::get(payload.icon.path())?;
+        let svg = String::from_utf8_lossy(&svg.data).replace("stroke=\"#000\"", &format!("stroke=\"{}\"", hex(t.fg)));
+        let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).ok()?;
+        let k = GLYPH * s / tree.size().width().max(tree.size().height());
+        let inset = (tile_size - GLYPH) / 2.;
+        let transform = tiny_skia::Transform::from_scale(k, k).post_translate((x + inset) * s, (y + inset) * s);
+        resvg::render(&tree, transform, &mut pixmap.as_mut());
+    }
+    if let (Some(badge), Some(bx)) = (badge, badge_x) {
+        badge.draw(&mut pixmap, bx, 0., s, t)?;
+    }
     Some(to_drag_icon(pixmap, scale))
 }
 
+fn solid(color: Hsla) -> Option<tiny_skia::Paint<'static>> {
+    let c = Rgba::from(color);
+    let mut paint = tiny_skia::Paint::default();
+    paint.set_color(tiny_skia::Color::from_rgba(c.r, c.g, c.b, c.a)?);
+    paint.anti_alias = true;
+    Some(paint)
+}
+
+fn hex(color: Hsla) -> String {
+    let c = Rgba::from(color);
+    let byte = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", byte(c.r), byte(c.g), byte(c.b))
+}
+
+/// The number of dragged files on an accent chip (like the in-window ghost's MOVE badge).
+/// resvg is built without text support, so the digits are drawn as stroked paths.
+struct CountBadge {
+    text: String,
+    /// Logical size.
+    width: f32,
+    /// How far the badge reaches past the stack's right edge.
+    overhang: f32,
+}
+
+impl CountBadge {
+    const HEIGHT: f32 = 16.;
+    const PAD: f32 = 5.;
+    /// Glyph box in logical px (the paths below use a 6×10 grid).
+    const GLYPH_H: f32 = 8.;
+    const GLYPH_W: f32 = 6. * Self::GLYPH_H / 10.;
+    const TRACK: f32 = 1.6;
+
+    fn new(count: usize) -> Self {
+        let text = if count > 999 { "999+".to_string() } else { count.to_string() };
+        let n = text.chars().count() as f32;
+        let width = (Self::PAD * 2. + n * Self::GLYPH_W + (n - 1.) * Self::TRACK).max(Self::HEIGHT);
+        CountBadge { text, width, overhang: 6. }
+    }
+
+    fn draw(&self, pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, s: f32, t: &Theme) -> Option<()> {
+        let rect = tiny_skia::Rect::from_xywh(x * s, y * s, self.width * s, Self::HEIGHT * s)?;
+        pixmap.fill_rect(rect, &solid(t.accent)?, tiny_skia::Transform::identity(), None);
+
+        let k = Self::GLYPH_H / 10.;
+        let n = self.text.chars().count() as f32;
+        let run = n * Self::GLYPH_W + (n - 1.) * Self::TRACK;
+        let (mut gx, gy) = (x + (self.width - run) / 2., y + (Self::HEIGHT - Self::GLYPH_H) / 2.);
+        let mut paths = String::new();
+        for ch in self.text.chars() {
+            paths.push_str(&format!(r#"<path transform="translate({gx} {gy}) scale({k})" d="{}"/>"#, digit_path(ch)));
+            gx += Self::GLYPH_W + Self::TRACK;
+        }
+        let (w, h) = (pixmap.width() as f32 / s, pixmap.height() as f32 / s);
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}"><g fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round">{paths}</g></svg>"#,
+            hex(t.on_accent),
+            1.5 / k,
+        );
+        let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).ok()?;
+        resvg::render(&tree, tiny_skia::Transform::from_scale(s, s), &mut pixmap.as_mut());
+        Some(())
+    }
+}
+
+/// A stroke drawing of `ch` (a digit or `+`) on a 6×10 grid, y down.
+fn digit_path(ch: char) -> &'static str {
+    match ch {
+        '0' => "M3 0Q0 0 0 5Q0 10 3 10Q6 10 6 5Q6 0 3 0Z",
+        '1' => "M1 2L3.5 0V10M1 10H6",
+        '2' => "M0.2 2.4Q0.8 0 3 0Q6 0 6 2.8Q6 4.6 0 10H6",
+        '3' => "M0.4 0H5.6L2.6 4Q6 4 6 7Q6 10 3 10Q0.8 10 0 8.4",
+        '4' => "M4.4 10V0L0 7H6",
+        '5' => "M5.6 0H0.8L0.4 4.6Q1.4 4 3 4Q6 4 6 7Q6 10 3 10Q0.8 10 0 8.4",
+        '6' => "M5.2 0.6Q4.4 0 3 0Q0 0 0 6Q0 10 3 10Q6 10 6 7Q6 4.4 3 4.4Q0.6 4.4 0 6.4",
+        '7' => "M0 0H6L2 10",
+        '8' => "M3 4.4Q0.6 4.4 0.6 2.2Q0.6 0 3 0Q5.4 0 5.4 2.2Q5.4 4.4 3 4.4Q0 4.4 0 7.2Q0 10 3 10Q6 10 6 7.2Q6 4.4 3 4.4Z",
+        '9' => "M0.8 9.4Q1.6 10 3 10Q6 10 6 4Q6 0 3 0Q0 0 0 3Q0 5.6 3 5.6Q5.4 5.6 6 3.6",
+        _ => "M3 2V8M0 5H6",
+    }
+}
+
 fn to_drag_icon(pixmap: tiny_skia::Pixmap, scale: u32) -> ExternalDragIcon {
-    let size = pixmap.width();
+    let (width, height) = (pixmap.width(), pixmap.height());
     // tiny-skia is premultiplied RGBA; wl_shm ARGB8888 is premultiplied BGRA in memory.
     let mut bgra = pixmap.take();
     for px in bgra.chunks_exact_mut(4) {
         px.swap(0, 2);
     }
-    ExternalDragIcon { width: size, height: size, scale, bgra }
+    ExternalDragIcon { width, height, scale, bgra }
 }
 
 /// The payload was released over the folder `dest`.
@@ -335,4 +412,33 @@ pub fn outline(t: &Theme, generation: usize, left_inset: f32, inset: f32) -> Any
             },
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::ThemeName;
+
+    fn payload(n: usize, image: bool) -> DragPayload {
+        let paths = (0..n).map(|i| PathBuf::from(format!("/tmp/f{i}.txt"))).collect();
+        let thumb = Arc::new(OnceLock::new());
+        if image {
+            let _ = thumb.set(Some(Thumb { side: 64, rgba: vec![255; 64 * 64 * 4] }));
+        }
+        DragPayload { paths: Arc::new(paths), icon: Icon::File, image: None, thumb }
+    }
+
+    #[test]
+    fn drag_icon_for_one_and_many() {
+        let t = Theme::get(ThemeName::Ash);
+        for (n, image) in [(1, false), (1, true), (3, false), (3, true), (12, false), (1500, true)] {
+            for scale in [1., 1.25, 2.] {
+                let icon = external_drag_icon(&payload(n, image), &t, scale);
+                let icon = icon.unwrap_or_else(|| panic!("no icon for {n} files, image {image}, scale {scale}"));
+                assert_eq!(icon.width % icon.scale, 0);
+                assert_eq!(icon.height % icon.scale, 0);
+                assert_eq!(icon.bgra.len(), (icon.width * icon.height * 4) as usize);
+            }
+        }
+    }
 }
